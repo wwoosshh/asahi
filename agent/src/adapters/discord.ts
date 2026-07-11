@@ -89,10 +89,27 @@ export function decideProgressEditThrottle(
   return { action: "later", delayMs: minIntervalMs - elapsed };
 }
 
-// 누적된 진행 라인 → 상태 메시지 문자열.
+// 디스코드 2000자 한도 보호용: 상태 메시지엔 최근 이 개수만큼만 표시한다.
+export const PROGRESS_DISPLAY_MAX_LINES = 12;
+
+// 연속으로 반복되는 라인(특히 "답변 작성 중")을 하나로 접는다. 떨어져서 반복되는 건 각각 남긴다.
+function collapseConsecutiveDuplicates(lines: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    if (out.length === 0 || out[out.length - 1] !== line) out.push(line);
+  }
+  return out;
+}
+
+// 누적된 진행 라인 → 상태 메시지 문자열. 무한 누적으로 2000자 한도를 넘기지 않도록
+// 연속 중복을 접고 최근 N개만 표시한다(순수 함수).
 export function formatProgressMessage(lines: readonly string[]): string {
   if (lines.length === 0) return "처리 중";
-  return ["처리 중", ...lines.map((line) => `· ${line}`)].join("\n");
+  const collapsed = collapseConsecutiveDuplicates(lines);
+  const display = collapsed.length > PROGRESS_DISPLAY_MAX_LINES
+    ? collapsed.slice(-PROGRESS_DISPLAY_MAX_LINES)
+    : collapsed;
+  return ["처리 중", ...display.map((line) => `· ${line}`)].join("\n");
 }
 
 // 채널(channelRef)별 진행 상태 UI 수명주기.
@@ -344,7 +361,9 @@ export class DiscordAdapter {
     const trigger = state?.pendingTriggers.shift() ?? null;
     if (!trigger) return;
     try {
-      await trigger.reactions.cache.get(PROCESSING_REACTION)?.remove();
+      // reaction.remove() 는 그 반응의 모든 사용자를 지우며 MANAGE_MESSAGES 를 요구하고 DM 에서 불가능하다.
+      // users.remove()(인자 없으면 봇 자신 → .../@me) 는 자기 반응만 지우므로 권한 없이도, DM 에서도 동작한다.
+      await trigger.reactions.cache.get(PROCESSING_REACTION)?.users.remove();
     } catch (err) {
       console.error("[discord] 반응 정리 실패:", err);
     }

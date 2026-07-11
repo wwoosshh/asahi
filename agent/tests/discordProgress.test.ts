@@ -61,4 +61,25 @@ describe("formatProgressMessage", () => {
   it("라인이 하나면 불릿 하나", () => {
     expect(formatProgressMessage(["답변 작성 중"])).toBe("처리 중\n· 답변 작성 중");
   });
+
+  it("연속으로 반복되는 라인(예: 답변 작성 중)은 하나로 접는다", () => {
+    expect(
+      formatProgressMessage(["답변 작성 중", "답변 작성 중", "답변 작성 중"]),
+    ).toBe("처리 중\n· 답변 작성 중");
+  });
+
+  it("연속 중복만 접고, 떨어져서 반복되는 라인은 각각 남긴다", () => {
+    expect(
+      formatProgressMessage(['recall("병원")', "답변 작성 중", "답변 작성 중", "recall 완료", "답변 작성 중"]),
+    ).toBe("처리 중\n· recall(\"병원\")\n· 답변 작성 중\n· recall 완료\n· 답변 작성 중");
+  });
+
+  it("표시 라인은 최근 N개(12개)로 상한을 둔다(디스코드 2000자 한도 보호)", () => {
+    const lines = Array.from({ length: 20 }, (_, i) => `단계${i}`);
+    const result = formatProgressMessage(lines);
+    const bulletLines = result.split("\n").slice(1);
+    expect(bulletLines.length).toBe(12);
+    expect(bulletLines[0]).toBe("· 단계8"); // 최근 12개만: 8..19
+    expect(bulletLines[bulletLines.length - 1]).toBe("· 단계19");
+  });
 });

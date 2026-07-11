@@ -15,7 +15,7 @@ import type { TurnRequest, TurnResult } from "../src/core/agent.js";
 const HOUR = 60 * 60 * 1000;
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" } = {}) {
+function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" } = {}) {
   const db = openDb(":memory:");
   const repos = {
     users: new UsersRepo(db), conversations: new ConversationsRepo(db), participants: new ParticipantsRepo(db),
@@ -37,6 +37,7 @@ function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" }
   const runTurn = (req: TurnRequest): Promise<TurnResult> => {
     calls.push(req);
     req.onProgress?.({ kind: "answering" }); // 코어가 onProgress 를 progress 이벤트로 발행하는지 확인용
+    if (mode === "throw") return Promise.reject(new Error("SDK 프로세스 오류(테스트용)"));
     if (mode === "immediate") return Promise.resolve(nextResult);
     return new Promise((res) => resolvers.push(() => res(nextResult)));
   };
@@ -220,6 +221,17 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     pub(t.bus, dmHint("owner", "owner"), "안녕", 1);
     await t.core.drain();
     expect(t.published.find((e) => e.type === "system_notice")?.text).toContain("오류");
+  });
+
+  it("runTurn이 예외를 던지면 system_notice를 발행하고 메시지를 완료 처리한다(유령 상태 메시지·FIFO 오염 방지)", async () => {
+    const t = setup({ mode: "throw" });
+    pub(t.bus, dmHint("owner", "owner"), "안녕", 1);
+    await t.core.drain();
+    const notice = t.published.find((e) => e.type === "system_notice");
+    expect(notice).toBeDefined();
+    expect(notice?.channelRef).toBe("dm-owner");
+    // finally 의 markProcessed 는 예외 시에도 반드시 실행되어야 한다(대화 체인이 영구 정지하지 않도록).
+    expect(t.repos.messages.unprocessedUserMessages().length).toBe(0);
   });
 
   it("부팅 시 미처리 메시지를 그 대화 문맥으로 재개한다", async () => {

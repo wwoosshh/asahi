@@ -189,6 +189,15 @@ export class AgentCore {
       this.repos.messages.insert({ conversationId: conv.id, ts: this.now(), role: "assistant", content: result.text });
       this.repos.conversations.setSession(conv.id, result.sessionId ?? conv.sessionId, this.now());
       this.bus.publish({ type: "assistant_message", channel: "discord", channelRef: conv.discordChannelId, text: result.text, ts: this.now() });
+    } catch (err) {
+      // 예외(SDK 프로세스 오류·인증 throw 등)도 종료 이벤트를 반드시 발행해야 한다. 그러지 않으면
+      // 어댑터의 finishStatus 가 불려지지 않아 그 채널의 상태 메시지·반응이 유령으로 남고,
+      // pendingTriggers(FIFO)가 영구적으로 어긋난다.
+      console.error("[core] runConversationTurn 예외:", err);
+      const conv = this.repos.conversations.getById(convId);
+      if (conv) {
+        this.notify(conv, "비서 처리 중 예기치 못한 오류가 발생했어요. 잠시 후 다시 시도해 주세요.");
+      }
     } finally {
       this.repos.messages.markProcessed(messageId);
     }
