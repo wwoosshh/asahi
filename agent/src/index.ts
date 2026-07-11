@@ -1,5 +1,5 @@
-import "dotenv/config";
 import path from "node:path";
+import dotenv from "dotenv";
 import { loadConfig } from "./config.js";
 import { EventBus } from "./events/bus.js";
 import { openDb } from "./store/db.js";
@@ -8,6 +8,11 @@ import { ensureMemoryDir } from "./memory/memory.js";
 import { AgentCore } from "./core/core.js";
 import { runAgentTurn } from "./core/agent.js";
 import { DiscordAdapter } from "./adapters/discord.js";
+
+// 비밀값(.env)은 리포 루트(agent/ 바깥, data/ 와 같은 위치)에서 읽는다.
+// 혹시 agent/.env 에 뒀다면 두 번째 호출이 보완한다(이미 설정된 값은 덮어쓰지 않음).
+dotenv.config({ path: path.resolve("..", ".env") });
+dotenv.config();
 
 async function main() {
   const config = loadConfig();

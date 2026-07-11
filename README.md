@@ -27,7 +27,7 @@ Asahi/
 cd agent
 npm install
 npm test          # 단위 테스트 (vitest)
-npm run dev       # 개발 실행 (agent/.env 필요)
+npm run dev       # 개발 실행 (루트의 .env 필요 — .env.example 참고)
 ```
 
 ## 상시 구동 (PM2)
