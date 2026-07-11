@@ -33,7 +33,8 @@ async function main() {
   const shutdown = async () => {
     console.log("종료 중...");
     clearInterval(idleTimer);
-    await discord.stop();
+    await core.drain();     // 처리 중인 메시지를 마저 끝내고
+    await discord.stop();   // 체인에 남은 전송을 흘려보낸 뒤 클라이언트 종료
     db.close();
     process.exit(0);
   };

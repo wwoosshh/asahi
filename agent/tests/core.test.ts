@@ -138,4 +138,26 @@ describe("AgentCore", () => {
     await t.core.drain();
     expect(t.repo.unprocessedUserMessages()).toHaveLength(0);
   });
+
+  it("빈 응답이면 저장/발행 대신 폴백 안내를 보낸다", async () => {
+    const t = setup();
+    t.setResult({ text: "   ", sessionId: "s1", ok: true });
+    t.bus.publish(userMsg("안녕", 1));
+    await t.core.drain();
+    const types = t.repo.recentEvents(10).map((e) => e.type);
+    expect(types).toEqual(["user_message", "system_notice"]); // assistant_message 미기록
+    expect(t.published.find((e) => e.type === "system_notice")).toBeDefined();
+  });
+
+  it("유휴 요약도 한도에 포함되어, 한도 초과면 요약을 건너뛰고 세션만 정리한다", async () => {
+    const t = setup({ maxTurnsPerHour: 1, sessionIdleMinutes: 30 });
+    t.bus.publish(userMsg("안녕", 1));
+    await t.core.drain(); // 사용자 턴 1회로 한도 소진
+    expect(t.repo.getSetting("session.id")).toBe("s1");
+    t.setClock(1_000_000 + 31 * 60 * 1000);
+    await t.core.closeIdleSessionIfNeeded();
+    expect(t.calls).toHaveLength(1); // 요약 턴이 실행되지 않음(한도 초과)
+    expect(t.repo.recentSummaries(1)).toEqual([]);
+    expect(t.repo.getSetting("session.id")).toBeNull(); // 세션은 정리됨
+  });
 });

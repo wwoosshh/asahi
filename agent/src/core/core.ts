@@ -110,6 +110,13 @@ export class AgentCore {
         return;
       }
 
+      if (result.text.trim().length === 0) {
+        // 성공했지만 최종 텍스트가 비어 있음(모델이 도구 호출만 하고 끝낸 경우 등).
+        // 빈 메시지를 저장/발행하지 않고 소유자에게 무응답을 표면화한다.
+        this.notify(event.channelRef, "이번엔 드릴 답을 만들지 못했어요. 다시 한 번 말씀해 주세요.");
+        return;
+      }
+
       if (result.sessionId) {
         this.repo.setSetting("session.id", result.sessionId);
         this.repo.setSetting("session.lastActiveTs", String(this.now()));
@@ -125,23 +132,46 @@ export class AgentCore {
   }
 
   async closeIdleSessionIfNeeded(): Promise<void> {
+    // 메시지 처리 중이면 이번 틱은 건너뛴다(다음 호출에서 재시도). 큐와 직렬화해
+    // 요약 턴이 handleUserMessage 와 인터리브되어 세션 상태가 꼬이는 것을 막는다.
+    if (this.processing) return;
     const session = this.currentSession();
     if (!session) return;
     if (this.now() - session.lastActiveTs < this.idleMs()) return;
 
-    const firstEventId = Number(this.repo.getSetting("session.firstEventId") ?? 0);
-    const result = await this.runTurn({
-      prompt: SUMMARY_PROMPT,
-      systemPrompt: buildSystemPrompt(this.config.memoryDir),
-      resume: session.id,
-      cwd: process.cwd(),
-    });
-    if (result.ok && result.text.trim().length > 0) {
-      const lastEvent = this.repo.recentEvents(1)[0];
-      this.repo.insertSummary({
-        createdTs: this.now(), fromEventId: firstEventId, toEventId: lastEvent?.id ?? firstEventId, content: result.text.trim(),
+    this.processing = true;
+    try {
+      // 요약도 실제 LLM 호출이므로 시간당 한도에 포함한다. 한도 초과면 요약을 건너뛰되
+      // 세션은 반드시 정리해 유휴 세션이 매 분 재시도되며 예산을 계속 쓰지 않게 한다.
+      if (!this.checkRateLimit()) {
+        this.clearSession();
+        return;
+      }
+      const firstEventId = Number(this.repo.getSetting("session.firstEventId") ?? 0);
+      const toEventId = this.repo.recentEvents(1)[0]?.id ?? firstEventId; // await 이전에 범위 캡처
+      this.turnTimestamps.push(this.now());
+      const result = await this.runTurn({
+        prompt: SUMMARY_PROMPT,
+        systemPrompt: buildSystemPrompt(this.config.memoryDir),
+        resume: session.id,
+        cwd: process.cwd(),
       });
+      if (result.ok && result.text.trim().length > 0) {
+        this.repo.insertSummary({
+          createdTs: this.now(), fromEventId: firstEventId, toEventId, content: result.text.trim(),
+        });
+      }
+      // compare-and-delete: 요약 대상이던 세션이 그대로일 때만 정리(동시 생성된 새 세션 보호).
+      if (this.repo.getSetting("session.id") === session.id) {
+        this.clearSession();
+      }
+    } finally {
+      this.processing = false;
+      void this.processQueue(); // 요약 중 큐에 쌓였을 메시지 처리 + drain 대기자 해제
     }
+  }
+
+  private clearSession(): void {
     this.repo.deleteSetting("session.id");
     this.repo.deleteSetting("session.lastActiveTs");
     this.repo.deleteSetting("session.firstEventId");

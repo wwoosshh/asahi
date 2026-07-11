@@ -56,4 +56,18 @@ describe("Repo", () => {
     repo.markProcessed(id1);
     expect(repo.unprocessedUserMessages()).toHaveLength(0);
   });
+
+  it("특수문자가 섞인 자연어 질문도 예외 없이 검색한다", () => {
+    repo.insertEvent({ ts: 1, type: "user_message", content: "내일 병원 예약 잊지마" });
+    expect(() => repo.searchEvents("병원 언제였지?", 10)).not.toThrow();
+    expect(() => repo.searchEvents('"따옴표) 괄호', 10)).not.toThrow();
+    const hits = repo.searchEvents("병원?", 10);
+    expect(hits).toHaveLength(1);
+  });
+
+  it("조사가 붙은 형태도 접두 매칭으로 찾는다", () => {
+    repo.insertEvent({ ts: 1, type: "user_message", content: "병원에 다녀왔다" });
+    const hits = repo.searchEvents("병원", 10);
+    expect(hits.map((e) => e.content)).toContain("병원에 다녀왔다");
+  });
 });

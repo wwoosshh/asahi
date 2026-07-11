@@ -25,4 +25,16 @@ describe("chunkMessage", () => {
   it("빈 문자열은 빈 배열", () => {
     expect(chunkMessage("")).toEqual([]);
   });
+
+  it("서로게이트 쌍(이모지)이 경계에서 쪼개지지 않는다", () => {
+    const text = "a".repeat(1999) + "😀" + "a".repeat(1000); // 이모지가 1999/2000 경계에 걸림
+    const chunks = chunkMessage(text, 2000);
+    expect(chunks.join("")).toBe(text); // 문자 손실 없음
+    for (const c of chunks) {
+      const last = c.charCodeAt(c.length - 1);
+      const first = c.charCodeAt(0);
+      expect(last >= 0xd800 && last <= 0xdbff).toBe(false); // 끝이 외톨이 high surrogate 가 아님
+      expect(first >= 0xdc00 && first <= 0xdfff).toBe(false); // 시작이 외톨이 low surrogate 가 아님
+    }
+  });
 });

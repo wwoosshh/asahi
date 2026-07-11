@@ -44,12 +44,21 @@ export class Repo {
   }
 
   searchEvents(query: string, limit: number): StoredEvent[] {
+    // 자유 텍스트를 FTS5 안전 쿼리로 변환한다: 공백 토큰마다 큰따옴표로 감싸(특수문자·구문오류 방지)
+    // 끝에 * 를 붙여 접두 매칭한다. 덕분에 '병원' 검색이 '병원에' 같은 조사 붙은 형태도 잡고,
+    // '?'·따옴표·괄호 등이 섞인 자연어 질문도 SqliteError 없이 처리된다.
+    const match = query
+      .split(/\s+/)
+      .filter((t) => t.length > 0)
+      .map((t) => `"${t.replace(/"/g, '""')}"*`)
+      .join(" ");
+    if (match.length === 0) return [];
     const rows = this.db
       .prepare(
         `SELECT e.* FROM events_fts f JOIN events e ON e.id = f.rowid
          WHERE events_fts MATCH ? ORDER BY e.id DESC LIMIT ?`,
       )
-      .all(query, limit) as Row[];
+      .all(match, limit) as Row[];
     return rows.map(toEvent);
   }
 

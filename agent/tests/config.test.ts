@@ -25,4 +25,10 @@ describe("loadConfig", () => {
   it("필수값이 없으면 무엇이 빠졌는지 알려주며 실패한다", () => {
     expect(() => loadConfig({})).toThrow(/DISCORD_TOKEN/);
   });
+
+  it("숫자 env 가 잘못되면(오타·0·음수) 시작 시 명확히 실패한다", () => {
+    expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR: "30/hour" })).toThrow(/MAX_TURNS_PER_HOUR/);
+    expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR: "0" })).toThrow(/MAX_TURNS_PER_HOUR/);
+    expect(() => loadConfig({ ...base, SESSION_IDLE_MINUTES: "abc" })).toThrow(/SESSION_IDLE_MINUTES/);
+  });
 });
