@@ -8,6 +8,22 @@
 
 **Tech Stack:** Node.js 22 LTS, TypeScript 5 (ESM/NodeNext), `@anthropic-ai/claude-agent-sdk`, discord.js v14, better-sqlite3 (WAL+FTS5), vitest, PM2.
 
+## 프로젝트 폴더 구조 (2026-07-11 갱신)
+
+루트를 깨끗하게 유지하기 위해, 아래 태스크들의 코드 블록에 나오는 파일은 **리포 루트가 아니라 `agent/` 아래**에 만든다. 런타임 데이터와 운영 설정도 분리한다.
+
+| 계획 문서의 표기 위치 | 실제 생성 위치 |
+|---|---|
+| `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/…`, `tests/…`, `.env` | `agent/` 아래 |
+| `store/agent.db` (SQLite) | `data/store/agent.db` |
+| `memory/` (마크다운 기억) | `data/memory/` |
+| `ecosystem.config.cjs` | `deploy/ecosystem.config.cjs` |
+| `.gitignore`, `README.md` | 리포 루트 |
+
+- `config.ts`의 기본 경로는 `dataDir = ../data/store`, `memoryDir = ../data/memory` (cwd=`agent/` 기준).
+- PM2는 `cwd: agent/`로 구동하므로 앱 내부 상대 경로(`src`, `dist`, `../data`)가 그대로 성립한다.
+- 테스트의 import 경로(`../src/…`)는 `src`와 `tests`가 함께 `agent/`로 이동하므로 계획서 그대로 유효하다.
+
 ## Global Constraints
 
 - 스펙 문서: `docs/superpowers/specs/2026-07-11-pc-ai-assistant-design.md` — 이 계획은 스펙 12장 로드맵의 1단계만 구현한다.

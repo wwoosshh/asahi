@@ -99,19 +99,23 @@ LLM 세션(컨텍스트)은 유한하므로 세션을 영원히 유지하는 방
 ## 6. 컴포넌트 구성
 
 ```
-agent/
-├── src/
-│   ├── core/          # 에이전트 코어: 세션 생성·큐 관리·기억 주입·응답 라우팅
-│   ├── adapters/
-│   │   ├── discord/   # discord.js 봇 (DM + 지정 채널)
-│   │   └── chat-ui/   # Fastify + WebSocket 로컬 웹 채팅 (4단계)
-│   ├── events/        # 이벤트 버스와 이벤트 타입 정의
-│   ├── scheduler/     # croner 기반 예약 실행 + 감지기 모듈 (3단계)
-│   ├── store/         # SQLite 접근 계층 (better-sqlite3)
-│   └── goals/         # 장기 목표 엔진 (5단계)
-├── memory/            # 마크다운 장기 기억
-├── mcp/               # MCP 서버 설정 (Playwright 브라우저, GUI 조작)
-└── docs/
+Asahi/                         # 리포 루트 (폴더 + 메타파일만, 자잘한 파일 없음)
+├── agent/                     # 상주 에이전트 앱 (백엔드 데몬)
+│   ├── src/
+│   │   ├── core/              # 세션 생성·큐 관리·기억 주입·응답 라우팅
+│   │   ├── adapters/          # discord (1단계) · chat-ui (4단계)
+│   │   ├── events/            # 이벤트 버스와 이벤트 타입 정의
+│   │   ├── scheduler/         # croner 기반 예약 실행 + 감지기 (3단계)
+│   │   ├── store/             # SQLite 접근 계층 (better-sqlite3)
+│   │   └── goals/             # 장기 목표 엔진 (5단계)
+│   ├── tests/                 # vitest 단위 테스트
+│   └── mcp/                   # MCP 서버 설정 (Playwright 등, 2단계+)
+├── web/                       # 로컬 웹 채팅 UI 프론트엔드 (4단계, 예정)
+├── data/                      # 런타임 데이터 (gitignore) — 코드와 분리
+│   ├── store/                 #   SQLite DB: agent.db (+ backups/)
+│   └── memory/                #   마크다운 장기 기억
+├── deploy/                    # PM2 ecosystem.config.cjs 등 운영 설정
+└── docs/                      # 설계·계획 문서
 ```
 
 각 유닛의 책임과 인터페이스:
@@ -142,8 +146,8 @@ agent/
 ## 8. DB 관리·점검 플로우 (SQL 비숙련 사용자용)
 
 - **1차 수단 — 비서에게 묻기**: "지난주 대화 보여줘", "스케줄 목록 정리해줘" 등 자연어로 질의하면 비서가 DB를 조회해 표로 답한다. SQL은 비서가 대신 작성한다.
-- **2차 수단 — GUI 도구로 직접 검증**: **Beekeeper Studio** (사용자 선택 도구, 무료 Community 버전). SQLite 연결로 `E:\Asahi\store\agent.db`를 열어 표 형태로 탐색·필터·정렬. Read Only Mode는 유료 기능이므로, 무료 버전에서는 **조회(SELECT)만 하고 셀을 직접 수정하지 않는 규율**로 대체한다 — WAL 모드에서 읽기는 데이터를 변경하지 않으므로 안전하다. 완전히 무위험으로 보고 싶으면 라이브 파일 대신 **백업 사본**(`store/backups/`)을 연결한다.
-- DB는 단일 파일(`E:\Asahi\store\agent.db`)이므로 백업은 파일 복사로 충분하다. 비서가 주 1회 자동 백업(`store/backups/`)을 수행한다.
+- **2차 수단 — GUI 도구로 직접 검증**: **Beekeeper Studio** (사용자 선택 도구, 무료 Community 버전). SQLite 연결로 `E:\Asahi\data\store\agent.db`를 열어 표 형태로 탐색·필터·정렬. Read Only Mode는 유료 기능이므로, 무료 버전에서는 **조회(SELECT)만 하고 셀을 직접 수정하지 않는 규율**로 대체한다 — WAL 모드에서 읽기는 데이터를 변경하지 않으므로 안전하다. 완전히 무위험으로 보고 싶으면 라이브 파일 대신 **백업 사본**(`data/store/backups/`)을 연결한다.
+- DB는 단일 파일(`E:\Asahi\data\store\agent.db`)이므로 백업은 파일 복사로 충분하다. 비서가 주 1회 자동 백업(`data/store/backups/`)을 수행한다.
 
 ## 9. 안전장치
 
