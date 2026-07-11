@@ -20,6 +20,10 @@ export type Config = {
   memoryDir: string;
   sessionIdleMinutes: number;
   maxTurnsPerHour: number;
+  // 멀티유저 한도(2B): 코어는 이 3개를 사용한다. maxTurnsPerHour 는 하위호환용으로 남긴다.
+  maxTurnsPerHourPerUser: number; // 유저별 시간당 상한 (기본 20)
+  maxTurnsPerHourGlobal: number;  // 전역 시간당 상한 (기본 40)
+  ownerReserve: number;           // 전역 중 소유자 예약분 (기본 10) — 손님이 소유자 몫을 잠식 못 하게
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -37,5 +41,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     memoryDir: env.MEMORY_DIR || path.resolve("..", "data", "memory"),
     sessionIdleMinutes: positiveNumberEnv(env, "SESSION_IDLE_MINUTES", 30),
     maxTurnsPerHour: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR", 30),
+    maxTurnsPerHourPerUser: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR_PER_USER", 20),
+    maxTurnsPerHourGlobal: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR_GLOBAL", 40),
+    ownerReserve: positiveNumberEnv(env, "OWNER_RESERVE", 10),
   };
 }

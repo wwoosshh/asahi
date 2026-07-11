@@ -15,6 +15,26 @@ describe("loadConfig", () => {
     expect(c.memoryDir.endsWith("memory")).toBe(true);
   });
 
+  it("멀티유저 한도 기본값을 로드한다", () => {
+    const c = loadConfig(base);
+    expect(c.maxTurnsPerHourPerUser).toBe(20);
+    expect(c.maxTurnsPerHourGlobal).toBe(40);
+    expect(c.ownerReserve).toBe(10);
+  });
+
+  it("멀티유저 한도를 env 로 덮어쓸 수 있다", () => {
+    const c = loadConfig({ ...base, MAX_TURNS_PER_HOUR_PER_USER: "7", MAX_TURNS_PER_HOUR_GLOBAL: "15", OWNER_RESERVE: "4" });
+    expect(c.maxTurnsPerHourPerUser).toBe(7);
+    expect(c.maxTurnsPerHourGlobal).toBe(15);
+    expect(c.ownerReserve).toBe(4);
+  });
+
+  it("멀티유저 한도 env 가 잘못되면(0·음수·오타) 시작 시 명확히 실패한다", () => {
+    expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR_PER_USER: "0" })).toThrow(/MAX_TURNS_PER_HOUR_PER_USER/);
+    expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR_GLOBAL: "-3" })).toThrow(/MAX_TURNS_PER_HOUR_GLOBAL/);
+    expect(() => loadConfig({ ...base, OWNER_RESERVE: "abc" })).toThrow(/OWNER_RESERVE/);
+  });
+
   it("선택값을 덮어쓸 수 있다", () => {
     const c = loadConfig({ ...base, DISCORD_CHANNEL_ID: "ch1", SESSION_IDLE_MINUTES: "10", MAX_TURNS_PER_HOUR: "5" });
     expect(c.channelId).toBe("ch1");
