@@ -142,7 +142,7 @@ agent/
 ## 8. DB 관리·점검 플로우 (SQL 비숙련 사용자용)
 
 - **1차 수단 — 비서에게 묻기**: "지난주 대화 보여줘", "스케줄 목록 정리해줘" 등 자연어로 질의하면 비서가 DB를 조회해 표로 답한다. SQL은 비서가 대신 작성한다.
-- **2차 수단 — GUI 도구로 직접 검증**: **DB Browser for SQLite**(무료, 표 형태 탐색·필터·정렬을 마우스로) 또는 **Beekeeper Studio**(모던 UI). 비서 가동 중에는 반드시 **읽기 전용으로 열기** — WAL 모드라 읽기는 항상 안전하다.
+- **2차 수단 — GUI 도구로 직접 검증**: **Beekeeper Studio** (사용자 선택 도구, 무료 Community 버전). SQLite 연결로 `store/agent.db`를 열어 표 형태로 탐색·필터·정렬. 비서 가동 중에는 반드시 **Read Only로 연결** — WAL 모드라 읽기는 항상 안전하다. (대안: DB Browser for SQLite)
 - DB는 단일 파일(`store/agent.db`)이므로 백업은 파일 복사로 충분하다. 비서가 주 1회 자동 백업(`store/backups/`)을 수행한다.
 
 ## 9. 안전장치
