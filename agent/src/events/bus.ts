@@ -18,7 +18,9 @@ export type ConversationHint = {
 export type UserMessageEvent = { type: "user_message"; channel: ChannelKind; channelRef: string; text: string; ts: number; hint?: ConversationHint };
 export type AssistantMessageEvent = { type: "assistant_message"; channel: ChannelKind; channelRef: string; text: string; ts: number };
 export type SystemNoticeEvent = { type: "system_notice"; channel: ChannelKind; channelRef: string; text: string; ts: number };
-export type AgentEvent = UserMessageEvent | AssistantMessageEvent | SystemNoticeEvent;
+// 턴 처리 중 진행 상황(도구 호출/결과/답변 시작 등)을 알리는 이벤트(2B). 실제 표시(전송·편집)는 어댑터 쪽 책임.
+export type ProgressEvent = { type: "progress"; channel: ChannelKind; channelRef: string; text: string; ts: number };
+export type AgentEvent = UserMessageEvent | AssistantMessageEvent | SystemNoticeEvent | ProgressEvent;
 
 type Handler = (e: AgentEvent) => void | Promise<void>;
 

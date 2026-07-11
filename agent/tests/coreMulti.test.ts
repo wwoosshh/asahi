@@ -36,6 +36,7 @@ function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" }
   const mode = over.mode ?? "immediate";
   const runTurn = (req: TurnRequest): Promise<TurnResult> => {
     calls.push(req);
+    req.onProgress?.({ kind: "answering" }); // 코어가 onProgress 를 progress 이벤트로 발행하는지 확인용
     if (mode === "immediate") return Promise.resolve(nextResult);
     return new Promise((res) => resolvers.push(() => res(nextResult)));
   };
@@ -45,6 +46,7 @@ function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" }
   const published: AgentEvent[] = [];
   bus.subscribe("assistant_message", (e) => published.push(e));
   bus.subscribe("system_notice", (e) => published.push(e));
+  bus.subscribe("progress", (e) => published.push(e));
   return {
     db, bus, core, calls, published, repos, resolvers,
     setClock: (t: number) => { clock = t; },
@@ -201,6 +203,15 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     const roles = t.repos.messages.recent(conv.id, 10).map((m) => m.role);
     expect(roles).not.toContain("assistant");
     expect(t.published.find((e) => e.type === "system_notice")).toBeDefined();
+  });
+
+  it("runTurn 이 onProgress 를 호출하면 progress 이벤트가 그 대화 채널로 발행된다", async () => {
+    const t = setup();
+    pub(t.bus, dmHint("owner", "owner"), "안녕", 1);
+    await t.core.drain();
+    const progress = t.published.find((e) => e.type === "progress");
+    expect(progress).toBeDefined();
+    expect(progress).toMatchObject({ type: "progress", channel: "discord", channelRef: "dm-owner", text: "답변 작성 중" });
   });
 
   it("턴이 실패하면 오류를 안내한다", async () => {

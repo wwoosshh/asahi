@@ -1,6 +1,6 @@
 import type { EventBus, UserMessageEvent, ConversationHint } from "../events/bus.js";
 import type { Config } from "../config.js";
-import type { TurnRunner, TurnContext } from "./agent.js";
+import type { TurnRunner, TurnContext, ProgressUpdate } from "./agent.js";
 import { buildSystemPrompt } from "./persona.js";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
@@ -16,6 +16,18 @@ const HOUR_MS = 60 * 60 * 1000;
 const SUMMARY_PROMPT = `이 대화 세션이 곧 종료됩니다. 나중에 다시 깨어날 너 자신을 위해 이번 대화를 요약하세요.
 - 결정된 것, 사용자에 대해 새로 알게 된 것, 진행 중인 일 중심으로 10줄 이내
 - 요약 텍스트만 출력 (인사말·설명 없이)`;
+
+// ProgressUpdate → 사용자용 짧은 텍스트(순수 함수, 디스코드 태스크가 그대로 재사용한다).
+export function formatProgress(u: ProgressUpdate): string {
+  switch (u.kind) {
+    case "tool":
+      return u.input !== undefined ? `${u.name}("${u.input}")` : `${u.name}()`;
+    case "tool_result":
+      return u.name ? `${u.name} 완료` : "도구 실행 완료";
+    case "answering":
+      return "답변 작성 중";
+  }
+}
 
 export type CoreRepos = {
   users: UsersRepo;
@@ -159,6 +171,9 @@ export class AgentCore {
         prompt,
         systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner }),
         resume, cwd: this.agentCwd, context,
+        onProgress: (u) => {
+          this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
+        },
       });
 
       if (!result.ok) {
