@@ -944,9 +944,10 @@ describe("TurnsRepo.reserve", () => {
   });
 
   it("윈도우 밖 오래된 턴은 카운트에서 제외", () => {
-    repo.reserve(opts({ ts: 0 })); // 아주 오래 전
-    expect(repo.reserve(opts({ ts: 1_000_000 }))).toBe(true);
-    expect(repo.reserve(opts({ ts: 1_000_001 }))).toBe(true); // 옛것은 창 밖이라 2건만 셈 → 통과
+    repo.reserve(opts({ ts: 0 })); // 1시간보다 훨씬 전 → 이후 창 밖
+    const t = 2 * HOUR;            // 창 시작(t-HOUR=HOUR>0)이라 ts=0 은 카운트 제외
+    expect(repo.reserve(opts({ ts: t }))).toBe(true);     // 창 안 0건 → 예약
+    expect(repo.reserve(opts({ ts: t + 1 }))).toBe(true); // 창 안 1건(ts=t)만 셈 → perUserLimit 2 미만 → 통과
   });
 });
 ```
