@@ -1,6 +1,21 @@
 export type ChannelKind = "discord";
 
-export type UserMessageEvent = { type: "user_message"; channel: ChannelKind; channelRef: string; text: string; ts: number };
+// 어댑터가 라우팅을 확정한 뒤 코어에 넘기는 대화 매핑 힌트(2B).
+// 코어는 이 힌트로 conversations 행을 조회/생성(멱등)하고 프라이버시 스코프를 정한다.
+export type ConversationHint = {
+  kind: "dm" | "thread";
+  discordChannelId: string;    // 응답·대화 매핑 열쇠 (DM 채널 또는 스레드 채널)
+  originMessageId?: string;    // 멱등키: 스레드를 처음 연 트리거 메시지 id (thread-create/adopt)
+  guildId?: string;
+  parentChannelId?: string;
+  isPrivate: boolean;          // DM=true, 서버/스레드=false
+  primaryUserId: string;       // 대화의 주 사용자(DM 상대·스레드 개설자)
+  userId: string;              // 이번 발화자
+  role: "owner" | "allowed";   // blocked/미등록은 애초에 이벤트를 발행하지 않음
+  discordMessageId: string;    // 사용자 메시지 id (저장·중복방지)
+};
+
+export type UserMessageEvent = { type: "user_message"; channel: ChannelKind; channelRef: string; text: string; ts: number; hint?: ConversationHint };
 export type AssistantMessageEvent = { type: "assistant_message"; channel: ChannelKind; channelRef: string; text: string; ts: number };
 export type SystemNoticeEvent = { type: "system_notice"; channel: ChannelKind; channelRef: string; text: string; ts: number };
 export type AgentEvent = UserMessageEvent | AssistantMessageEvent | SystemNoticeEvent;

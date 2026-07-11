@@ -4,6 +4,8 @@ import { loadConfig } from "./config.js";
 import { EventBus } from "./events/bus.js";
 import { openDb } from "./store/db.js";
 import { Repo } from "./store/repo.js";
+import { UsersRepo } from "./store/usersRepo.js";
+import { ConversationsRepo } from "./store/conversationsRepo.js";
 import { ensureMemoryDir } from "./memory/memory.js";
 import { AgentCore } from "./core/core.js";
 import { runAgentTurn } from "./core/agent.js";
@@ -22,10 +24,13 @@ async function main() {
   const repo = new Repo(db);
   const bus = new EventBus();
 
+  const users = new UsersRepo(db);
+  const conversations = new ConversationsRepo(db);
+
   const core = new AgentCore({ bus, repo, config, runTurn: runAgentTurn });
   core.start();
 
-  const discord = new DiscordAdapter({ bus, config });
+  const discord = new DiscordAdapter({ bus, config, users, conversations });
   await discord.start();
 
   await core.recoverPending(); // 크래시로 남은 미처리 메시지 재개
