@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideRoute, type Incoming } from "../src/adapters/discord.js";
+import { decideRoute, detectBotMention, type Incoming } from "../src/adapters/discord.js";
 
 function inc(over: Partial<Incoming> = {}): Incoming {
   return {
@@ -42,5 +42,24 @@ describe("decideRoute", () => {
 
   it("이미 대화로 채택된 채널(스레드 생성 폴백 등)은 멘션 없이도 이어간다", () => {
     expect(decideRoute(inc({ isThread: false, mentionsBot: false }), "allowed", true)).toEqual({ kind: "thread-existing" });
+  });
+});
+
+describe("detectBotMention", () => {
+  // discord.js MessageMentions.has 의 실제 의미를 모조한다:
+  // 기본 옵션(ignoreEveryone=false)이면 @everyone/@here 에도 true 로 단락된다.
+  const fakeMentions = (opts: { directHasBot: boolean; everyone: boolean }) => ({
+    has: (_bot: unknown, o?: { ignoreEveryone?: boolean }) => {
+      if (!o?.ignoreEveryone && opts.everyone) return true;
+      return opts.directHasBot;
+    },
+  });
+
+  it("@everyone/@here 만 있고 봇 직접 멘션이 없으면 false (예산 잠식 방지)", () => {
+    expect(detectBotMention(fakeMentions({ directHasBot: false, everyone: true }), {})).toBe(false);
+  });
+
+  it("봇을 직접 @멘션하면 true", () => {
+    expect(detectBotMention(fakeMentions({ directHasBot: true, everyone: false }), {})).toBe(true);
   });
 });

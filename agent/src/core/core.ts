@@ -76,10 +76,10 @@ export class AgentCore {
   // 힌트로 대화 행을 확정한다(멱등: discord_channel_id → origin_message_id → 생성).
   private resolveConversation(hint: ConversationHint, ts: number): Conversation {
     const byChannel = this.repos.conversations.getByChannelId(hint.discordChannelId);
-    if (byChannel) return byChannel;
+    if (byChannel) return this.reactivate(byChannel);
     if (hint.originMessageId) {
       const byOrigin = this.repos.conversations.getByOriginMessageId(hint.originMessageId);
-      if (byOrigin) return byOrigin;
+      if (byOrigin) return this.reactivate(byOrigin);
     }
     this.repos.conversations.create({
       kind: hint.kind, discordChannelId: hint.discordChannelId, originMessageId: hint.originMessageId,
@@ -87,6 +87,16 @@ export class AgentCore {
       isPrivate: hint.isPrivate, lastActiveTs: ts,
     });
     return this.repos.conversations.getByChannelId(hint.discordChannelId)!;
+  }
+
+  // 유휴 정리로 status='idle' 로 닫혔던 대화가 새 메시지로 재활성되면 'active' 로 되살린다.
+  // (listActiveIdle 은 status='active' 만 대상으로 하므로, 복원하지 않으면 이후 유휴 스윕에서 영구 누락된다.)
+  private reactivate(conv: Conversation): Conversation {
+    if (conv.status !== "active") {
+      this.repos.conversations.setStatus(conv.id, "active");
+      return { ...conv, status: "active" };
+    }
+    return conv;
   }
 
   // 대화별 직렬락: 그 대화의 꼬리 프라미스에 작업을 이어붙인다.
@@ -112,7 +122,9 @@ export class AgentCore {
     try {
       const conv = this.repos.conversations.getById(convId);
       if (!conv) return;
-      const isOwner = role === "owner";
+      // 특권/전원열람 게이트는 role 이 아니라 소유자 신원(§6 불변식: primary_user_id=owner)으로 판정한다.
+      // manage_access 로 손님에게 'owner' 역할이 부여되어도 신원이 아니면 특권을 갖지 못하게 한다.
+      const isOwner = userId === this.ownerId;
 
       // 한도: 이 턴을 원자적으로 예약(유저별+전역, 소유자 예약분). 실패면 안내 후 종료.
       const reserved = this.repos.turns.reserve({
@@ -132,6 +144,8 @@ export class AgentCore {
         resume = conv.sessionId;
       } else {
         prompt = `${this.buildContextBlock(conv, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
+        // 이 메시지가 새 세션 윈도우의 시작 → 요약 범위(from_message_id) 기준점으로 기록한다.
+        this.repos.conversations.setFirstMessageId(conv.id, messageId);
         if (conv.isPrivate && conv.primaryUserId === this.ownerId) {
           this.repos.conversations.setPrivateMemoryLoaded(conv.id, true);
         }

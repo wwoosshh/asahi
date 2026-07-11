@@ -90,6 +90,14 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     expect(t.calls[0].prompt).not.toContain("소유자비밀O");
   });
 
+  it("역할이 'owner'로 부여된 손님이라도 소유자 신원이 아니면 특권(isOwner)을 갖지 않는다(프라이버시 게이트 신원화)", async () => {
+    const t = setup();
+    t.repos.users.upsert("guest", { role: "owner" }); // 손님에게 owner 역할이 부여된 상황
+    pub(t.bus, dmHint("guest", "owner"), "hi", 1);     // role=owner 로 들어오지만 userId≠ownerId
+    await t.core.drain();
+    expect(t.calls[0].context.isOwner).toBe(false);    // 신원(userId===ownerId)이 아니므로 전원열람·특권 없음
+  });
+
   it("턴 컨텍스트로 role/isPrivate/isOwner 를 정확히 전달한다(도구 제한 근거)", async () => {
     const t = setup();
     pub(t.bus, threadHint("guest", "ch-1", "allowed", "g1"), "hi", 1);
@@ -208,6 +216,49 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     await t.core.closeIdleConversations();
     await t.core.drain();
     expect(t.repos.summaries.recent(conv.id, 1)).toEqual(["인사를 나눴다."]);
+    expect(t.repos.conversations.getById(conv.id)!.sessionId).toBeNull();
+  });
+
+  it("요약의 from_message_id 를 세션 첫 메시지로 기록한다(0 이 아님)", async () => {
+    const t = setup();
+    pub(t.bus, dmHint("owner", "owner"), "첫 메시지", t.now());
+    await t.core.drain();
+    const conv = t.repos.conversations.getByChannelId("dm-owner")!;
+    const firstUserMsg = t.repos.messages.recent(conv.id, 10).find((m) => m.role === "user")!;
+    t.setClock(1_000_000 + 31 * 60 * 1000);
+    t.setResult({ text: "요약", sessionId: "s1", ok: true });
+    await t.core.closeIdleConversations();
+    await t.core.drain();
+    const row = t.db.prepare("SELECT from_message_id FROM conversation_summaries WHERE conversation_id = ?").get(conv.id) as { from_message_id: number };
+    expect(row.from_message_id).toBe(firstUserMsg.id);
+    expect(row.from_message_id).not.toBe(0);
+  });
+
+  it("유휴 정리로 닫힌 대화가 재활성되면 다음 유휴 사이클에 다시 요약된다(status 고착 방지)", async () => {
+    const t = setup();
+    pub(t.bus, dmHint("owner", "owner"), "1", t.now());
+    await t.core.drain();
+    const conv = t.repos.conversations.getByChannelId("dm-owner")!;
+
+    // 1차 유휴 정리 → 세션 닫힘
+    t.setClock(1_000_000 + 31 * 60 * 1000);
+    t.setResult({ text: "요약1", sessionId: "s1", ok: true });
+    await t.core.closeIdleConversations();
+    await t.core.drain();
+    expect(t.repos.conversations.getById(conv.id)!.sessionId).toBeNull();
+
+    // 재활성: 새 메시지 → 새 세션 s2
+    t.setResult({ text: "답", sessionId: "s2", ok: true });
+    pub(t.bus, dmHint("owner", "owner"), "2", t.now());
+    await t.core.drain();
+    expect(t.repos.conversations.getById(conv.id)!.sessionId).toBe("s2");
+
+    // 2차 유휴 → 다시 요약·종료되어야 한다(버그면 status='idle' 고착으로 스윕에서 누락)
+    t.setClock(t.now() + 31 * 60 * 1000);
+    t.setResult({ text: "요약2", sessionId: "s2", ok: true });
+    await t.core.closeIdleConversations();
+    await t.core.drain();
+    expect(t.repos.summaries.recent(conv.id, 1)).toEqual(["요약2"]);
     expect(t.repos.conversations.getById(conv.id)!.sessionId).toBeNull();
   });
 });

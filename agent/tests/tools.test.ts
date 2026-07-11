@@ -79,6 +79,12 @@ describe("manage_access 도구", () => {
     manageAccessHandler(owner, { userId: "철수", role: "allowed" });
     expect(owner.repos.users.getRole("철수")).toBe("blocked");
   });
+
+  it("owner 역할 부여는 거부한다(제2 소유자 생성 차단 — 신원 게이트 우회 방지)", () => {
+    const owner = ctx({ userId: "owner", isOwner: true, isPrivate: true });
+    manageAccessHandler(owner, { userId: "123456789", role: "owner" });
+    expect(owner.repos.users.getRole("123456789")).toBe("blocked"); // 미적용
+  });
 });
 
 describe("allowedToolsFor — 능력 계층(§7.1)", () => {

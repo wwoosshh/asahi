@@ -56,6 +56,14 @@ export function decideRoute(i: Incoming, role: Role, hasConversation: boolean): 
   return { kind: "ignore" };
 }
 
+// 봇이 "직접 @멘션" 되었는지만 판정한다. discord.js 의 기본 has(bot) 는 @everyone/@here·
+// 역할 멘션·답장 자동멘션에도 true 를 돌려주므로, 그것들을 무시하도록 옵션을 명시한다
+// (그렇지 않으면 @everyone 공지 하나에도 스레드가 생기고 LLM 턴이 소모된다).
+type MentionLike = { has(target: unknown, options?: { ignoreEveryone?: boolean; ignoreRoles?: boolean; ignoreRepliedUser?: boolean }): boolean };
+export function detectBotMention(mentions: MentionLike, bot: unknown): boolean {
+  return mentions.has(bot, { ignoreEveryone: true, ignoreRoles: true, ignoreRepliedUser: true });
+}
+
 const THREAD_NAME_MAX = 90;
 
 export class DiscordAdapter {
@@ -109,7 +117,7 @@ export class DiscordAdapter {
       channelId: message.channelId,
       isDM: message.channel.type === ChannelType.DM,
       isThread,
-      mentionsBot: message.mentions.has(bot),
+      mentionsBot: detectBotMention(message.mentions, bot),
       guildId: message.guildId ?? undefined,
       parentChannelId: isThread ? message.channel.parentId ?? undefined : undefined,
       content: message.content,

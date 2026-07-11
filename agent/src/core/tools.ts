@@ -44,7 +44,8 @@ export function manageAccessHandler(ctx: ToolCtx, args: { userId: string; role: 
   if (!(ctx.isOwner && ctx.isPrivate)) return "이 작업은 소유자 DM에서만 할 수 있어요.";
   // 명시적 스노플레이크(디스코드 숫자 ID)만 허용 — 표시명·동명 오작동 방지.
   if (!/^\d{5,}$/.test(args.userId)) return "사용자의 디스코드 숫자 ID(@멘션)를 정확히 지정해 주세요.";
-  if (!["owner", "allowed", "blocked"].includes(args.role)) return "역할은 owner/allowed/blocked 중 하나여야 해요.";
+  // 'owner' 부여는 거부한다 — 소유자는 단일 신원(config)이며, 제2 소유자 생성은 신원 게이트를 우회시킨다.
+  if (!["allowed", "blocked"].includes(args.role)) return "부여할 수 있는 역할은 allowed 또는 blocked 예요. (소유자는 바꿀 수 없어요)";
   ctx.repos.users.upsert(args.userId, { role: args.role });
   return `${args.userId} 님의 접근 권한을 '${args.role}'(으)로 설정했어요.`;
 }
@@ -79,8 +80,8 @@ export function buildTools(ctx: ToolCtx) {
       ),
       tool(
         "manage_access",
-        "(소유자 전용) 사용자의 접근 권한을 설정합니다. 디스코드 숫자 ID 로만.",
-        { userId: z.string().describe("디스코드 숫자 ID"), role: z.enum(["owner", "allowed", "blocked"]).describe("부여할 역할") },
+        "(소유자 전용) 사용자의 접근 권한을 설정합니다. 디스코드 숫자 ID 로만. owner 는 부여할 수 없습니다.",
+        { userId: z.string().describe("디스코드 숫자 ID"), role: z.enum(["allowed", "blocked"]).describe("부여할 역할(allowed 또는 blocked)") },
         async (args) => textResult(manageAccessHandler(ctx, args)),
       ),
     ],
