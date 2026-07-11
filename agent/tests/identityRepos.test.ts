@@ -44,6 +44,25 @@ describe("ConversationsRepo", () => {
     expect(c.lastActiveTs).toBe(20);
     expect(c.privateMemoryLoaded).toBe(true);
   });
+
+  it("id 로 조회한다(없으면 null)", () => {
+    const id = repo.create({ kind: "dm", discordChannelId: "c1", primaryUserId: "u1", isPrivate: true, lastActiveTs: 10 });
+    expect(repo.getById(id)!.discordChannelId).toBe("c1");
+    expect(repo.getById(9999)).toBeNull();
+  });
+
+  it("유휴 정리 대상은 세션이 있고 활성이며 last_active 가 컷오프 이전인 대화만", () => {
+    const a = repo.create({ kind: "dm", discordChannelId: "a", primaryUserId: "u1", isPrivate: true, lastActiveTs: 100 });
+    const b = repo.create({ kind: "thread", discordChannelId: "b", primaryUserId: "u2", isPrivate: false, lastActiveTs: 100 });
+    repo.setSession(a, "s-a", 100); // a: 세션 있음
+    // b: 세션 없음 → 제외
+    expect(repo.listActiveIdle(150).map((c) => c.id)).toEqual([a]);
+    repo.setSession(a, "s-a", 200); // a 활동 갱신 → 컷오프(150) 이후라 제외
+    expect(repo.listActiveIdle(150).map((c) => c.id)).toEqual([]);
+    repo.setSession(b, "s-b", 100); // b 세션 부여 → 이제 유휴 대상
+    repo.setStatus(b, "closed");    // 닫힘 → 제외
+    expect(repo.listActiveIdle(150).map((c) => c.id)).toEqual([]);
+  });
 });
 
 describe("ParticipantsRepo", () => {

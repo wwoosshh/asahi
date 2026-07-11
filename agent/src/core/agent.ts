@@ -1,6 +1,9 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { Role } from "../store/usersRepo.js";
 
-export type TurnRequest = { prompt: string; systemPrompt: string; resume?: string; cwd: string };
+// 현재 턴의 상대·대화 컨텍스트. Task 5 에서 이걸로 role·is_private 별 도구셋(allowedTools)을 정한다.
+export type TurnContext = { role: Role; isPrivate: boolean; isOwner: boolean; userId: string; conversationId: number };
+export type TurnRequest = { prompt: string; systemPrompt: string; resume?: string; cwd: string; context: TurnContext };
 export type TurnResult = { text: string; sessionId?: string; ok: boolean };
 export type TurnRunner = (req: TurnRequest) => Promise<TurnResult>;
 

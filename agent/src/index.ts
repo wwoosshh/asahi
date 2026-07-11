@@ -3,31 +3,45 @@ import dotenv from "dotenv";
 import { loadConfig } from "./config.js";
 import { EventBus } from "./events/bus.js";
 import { openDb } from "./store/db.js";
-import { Repo } from "./store/repo.js";
 import { UsersRepo } from "./store/usersRepo.js";
 import { ConversationsRepo } from "./store/conversationsRepo.js";
-import { ensureMemoryDir } from "./memory/memory.js";
+import { ParticipantsRepo } from "./store/participantsRepo.js";
+import { MessagesRepo } from "./store/messagesRepo.js";
+import { SummariesRepo } from "./store/summariesRepo.js";
+import { MemoriesRepo } from "./store/memoriesRepo.js";
+import { TurnsRepo } from "./store/turnsRepo.js";
 import { AgentCore } from "./core/core.js";
 import { runAgentTurn } from "./core/agent.js";
 import { DiscordAdapter } from "./adapters/discord.js";
 
 // 비밀값(.env)은 리포 루트(agent/ 바깥, data/ 와 같은 위치)에서 읽는다.
-// 혹시 agent/.env 에 뒀다면 두 번째 호출이 보완한다(이미 설정된 값은 덮어쓰지 않음).
 dotenv.config({ path: path.resolve("..", ".env") });
 dotenv.config();
 
 async function main() {
   const config = loadConfig();
-  ensureMemoryDir(config.memoryDir);
 
   const db = openDb(path.join(config.dataDir, "agent.db"));
-  const repo = new Repo(db);
-  const bus = new EventBus();
+  // TODO(Task 6): migrateFromPhase1(db, { ownerId, memoryDir }) 1회 호출.
 
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
+  const repos = {
+    users,
+    conversations,
+    participants: new ParticipantsRepo(db),
+    messages: new MessagesRepo(db),
+    summaries: new SummariesRepo(db),
+    memories: new MemoriesRepo(db),
+    turns: new TurnsRepo(db),
+  };
+  // 소유자를 users(owner)로 보장 — 게이트 통과 기본값.
+  users.upsert(config.ownerId, { role: "owner" });
 
-  const core = new AgentCore({ bus, repo, config, runTurn: runAgentTurn });
+  const bus = new EventBus();
+  // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다(Task 6 에서 확정).
+  const agentCwd = process.cwd();
+  const core = new AgentCore({ bus, config, runTurn: runAgentTurn, repos, agentCwd });
   core.start();
 
   const discord = new DiscordAdapter({ bus, config, users, conversations });
@@ -35,9 +49,9 @@ async function main() {
 
   await core.recoverPending(); // 크래시로 남은 미처리 메시지 재개
 
-  // 유휴 세션 정리: 1분마다 확인
+  // 유휴 세션 정리: 1분마다 대화별로 확인
   const idleTimer = setInterval(() => {
-    void core.closeIdleSessionIfNeeded().catch((err) => console.error("[core] 유휴 정리 오류:", err));
+    void core.closeIdleConversations().catch((err) => console.error("[core] 유휴 정리 오류:", err));
   }, 60 * 1000);
 
   const shutdown = async () => {

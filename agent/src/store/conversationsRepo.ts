@@ -38,9 +38,22 @@ export class ConversationsRepo {
     return Number(result.lastInsertRowid);
   }
 
+  getById(id: number): Conversation | null {
+    const row = this.db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as Row | undefined;
+    return row ? toConversation(row) : null;
+  }
+
   getByChannelId(discordChannelId: string): Conversation | null {
     const row = this.db.prepare("SELECT * FROM conversations WHERE discord_channel_id = ?").get(discordChannelId) as Row | undefined;
     return row ? toConversation(row) : null;
+  }
+
+  // 유휴 정리 대상: 활성 상태 + 열린 세션 + last_active 가 컷오프 이전. 오래된 것부터.
+  listActiveIdle(cutoffTs: number, limit = 100): Conversation[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM conversations WHERE status = 'active' AND session_id IS NOT NULL AND last_active_ts < ? ORDER BY last_active_ts ASC LIMIT ?",
+    ).all(cutoffTs, limit) as Row[];
+    return rows.map(toConversation);
   }
 
   getByOriginMessageId(originMessageId: string): Conversation | null {
