@@ -1,0 +1,37 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { openDb } from "../src/store/db.js";
+import { MemoriesRepo } from "../src/store/memoriesRepo.js";
+
+describe("MemoriesRepo", () => {
+  let repo: MemoriesRepo;
+  beforeEach(() => {
+    repo = new MemoriesRepo(openDb(":memory:"), () => 1);
+    repo.insert({ userId: "owner", scope: "user", title: "고양이", content: "고양이 두 마리" });
+    repo.insert({ userId: "bob", scope: "user", title: "밥선호", content: "매운 것 좋아함" });
+    repo.insert({ userId: "owner", scope: "shared", title: "서버규칙", content: "존댓말 사용" });
+  });
+
+  it("forUser 는 그 사용자 user 기억 + 전체 shared 만 준다(타인 user 제외)", () => {
+    const titles = repo.forUser("owner").map((m) => m.title).sort();
+    expect(titles).toEqual(["고양이", "서버규칙"]);
+    const bob = repo.forUser("bob").map((m) => m.title).sort();
+    expect(bob).toEqual(["밥선호", "서버규칙"]); // bob 의 user + shared, owner 의 user(고양이) 제외
+  });
+
+  it("sharedOnly 는 shared 만(개인기억 없음)", () => {
+    expect(repo.sharedOnly().map((m) => m.title)).toEqual(["서버규칙"]);
+  });
+
+  it("all 은 전원(소유자 recall 용)", () => {
+    expect(repo.all()).toHaveLength(3);
+  });
+
+  it("검색·수정·삭제", () => {
+    const hits = repo.searchForUser("owner", "고양이");
+    expect(hits).toHaveLength(1);
+    repo.update(hits[0].id, { content: "고양이 세 마리" });
+    expect(repo.searchForUser("owner", "고양이")[0].content).toBe("고양이 세 마리");
+    repo.delete(hits[0].id);
+    expect(repo.searchForUser("owner", "고양이")).toHaveLength(0);
+  });
+});
