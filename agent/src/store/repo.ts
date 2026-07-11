@@ -18,11 +18,22 @@ function toEvent(r: Row): StoredEvent {
 export class Repo {
   constructor(private db: Database.Database) {}
 
-  insertEvent(e: { ts: number; type: string; channel?: string; channelRef?: string; content: string }): number {
+  insertEvent(e: { ts: number; type: string; channel?: string; channelRef?: string; content: string; processed?: boolean }): number {
     const result = this.db
-      .prepare("INSERT INTO events (ts, type, channel, channel_ref, content) VALUES (?, ?, ?, ?, ?)")
-      .run(e.ts, e.type, e.channel ?? null, e.channelRef ?? null, e.content);
+      .prepare("INSERT INTO events (ts, type, channel, channel_ref, content, processed) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(e.ts, e.type, e.channel ?? null, e.channelRef ?? null, e.content, e.processed === false ? 0 : 1);
     return Number(result.lastInsertRowid);
+  }
+
+  unprocessedUserMessages(): StoredEvent[] {
+    const rows = this.db
+      .prepare("SELECT * FROM events WHERE type = 'user_message' AND processed = 0 ORDER BY id ASC")
+      .all() as Row[];
+    return rows.map(toEvent);
+  }
+
+  markProcessed(id: number): void {
+    this.db.prepare("UPDATE events SET processed = 1 WHERE id = ?").run(id);
   }
 
   recentEvents(limit: number): StoredEvent[] {

@@ -15,7 +15,7 @@ export class AgentCore {
   private config: Config;
   private runTurn: TurnRunner;
   private now: () => number;
-  private queue: UserMessageEvent[] = [];
+  private queue: Array<{ event: UserMessageEvent; storedId?: number }> = [];
   private processing = false;
   private turnTimestamps: number[] = [];
   private drainResolvers: Array<() => void> = [];
@@ -30,9 +30,25 @@ export class AgentCore {
 
   start(): void {
     this.bus.subscribe("user_message", (e) => {
-      this.queue.push(e);
+      this.queue.push({ event: e });
       void this.processQueue();
     });
+  }
+
+  async recoverPending(): Promise<void> {
+    for (const stored of this.repo.unprocessedUserMessages()) {
+      this.queue.push({
+        event: {
+          type: "user_message",
+          channel: (stored.channel ?? "discord") as "discord",
+          channelRef: stored.channelRef ?? "",
+          text: stored.content,
+          ts: stored.ts,
+        },
+        storedId: stored.id,
+      });
+    }
+    void this.processQueue();
   }
 
   drain(): Promise<void> {
@@ -45,10 +61,10 @@ export class AgentCore {
     this.processing = true;
     try {
       while (this.queue.length > 0) {
-        const event = this.queue.shift()!;
-        await this.handleUserMessage(event).catch((err) => {
+        const item = this.queue.shift()!;
+        await this.handleUserMessage(item.event, item.storedId).catch((err) => {
           console.error("[core] 처리 오류:", err);
-          this.notify(event.channelRef, `처리 중 오류가 발생했어요: ${String(err)}`);
+          this.notify(item.event.channelRef, `처리 중 오류가 발생했어요: ${String(err)}`);
         });
       }
     } finally {
@@ -57,49 +73,55 @@ export class AgentCore {
     }
   }
 
-  private async handleUserMessage(event: UserMessageEvent): Promise<void> {
-    const eventId = this.repo.insertEvent({
-      ts: event.ts, type: "user_message", channel: event.channel, channelRef: event.channelRef, content: event.text,
+  private async handleUserMessage(event: UserMessageEvent, storedId?: number): Promise<void> {
+    // 새 메시지는 미처리(processed=false)로 기록하고, 처리가 끝나면(성공·한도·오류·예외 모두)
+    // 완료 표시한다. 크래시로 중간에 죽으면 미처리로 남아 부팅 시 recoverPending()이 재개한다.
+    const eventId = storedId ?? this.repo.insertEvent({
+      ts: event.ts, type: "user_message", channel: event.channel, channelRef: event.channelRef, content: event.text, processed: false,
     });
 
-    if (!this.checkRateLimit()) {
-      this.notify(event.channelRef, "구독 한도 보호를 위해 잠시 쉬고 있어요. 1시간 안에 다시 시도해 주세요.");
-      return;
+    try {
+      if (!this.checkRateLimit()) {
+        this.notify(event.channelRef, "구독 한도 보호를 위해 잠시 쉬고 있어요. 1시간 안에 다시 시도해 주세요.");
+        return;
+      }
+
+      const session = this.currentSession();
+      let prompt = event.text;
+      let resume: string | undefined;
+
+      if (session && this.now() - session.lastActiveTs < this.idleMs()) {
+        resume = session.id;
+      } else {
+        prompt = `${this.buildContextBlock()}\n\n---\n\n사용자 메시지: ${event.text}`;
+        this.repo.setSetting("session.firstEventId", String(eventId));
+      }
+
+      this.turnTimestamps.push(this.now());
+      const result = await this.runTurn({
+        prompt,
+        systemPrompt: buildSystemPrompt(this.config.memoryDir),
+        resume,
+        cwd: process.cwd(),
+      });
+
+      if (!result.ok) {
+        this.notify(event.channelRef, `비서 처리 중 오류가 있었어요: ${result.text}`);
+        return;
+      }
+
+      if (result.sessionId) {
+        this.repo.setSetting("session.id", result.sessionId);
+        this.repo.setSetting("session.lastActiveTs", String(this.now()));
+      }
+
+      this.repo.insertEvent({
+        ts: this.now(), type: "assistant_message", channel: event.channel, channelRef: event.channelRef, content: result.text,
+      });
+      this.bus.publish({ type: "assistant_message", channel: event.channel, channelRef: event.channelRef, text: result.text, ts: this.now() });
+    } finally {
+      this.repo.markProcessed(eventId);
     }
-
-    const session = this.currentSession();
-    let prompt = event.text;
-    let resume: string | undefined;
-
-    if (session && this.now() - session.lastActiveTs < this.idleMs()) {
-      resume = session.id;
-    } else {
-      prompt = `${this.buildContextBlock()}\n\n---\n\n사용자 메시지: ${event.text}`;
-      this.repo.setSetting("session.firstEventId", String(eventId));
-    }
-
-    this.turnTimestamps.push(this.now());
-    const result = await this.runTurn({
-      prompt,
-      systemPrompt: buildSystemPrompt(this.config.memoryDir),
-      resume,
-      cwd: process.cwd(),
-    });
-
-    if (!result.ok) {
-      this.notify(event.channelRef, `비서 처리 중 오류가 있었어요: ${result.text}`);
-      return;
-    }
-
-    if (result.sessionId) {
-      this.repo.setSetting("session.id", result.sessionId);
-      this.repo.setSetting("session.lastActiveTs", String(this.now()));
-    }
-
-    this.repo.insertEvent({
-      ts: this.now(), type: "assistant_message", channel: event.channel, channelRef: event.channelRef, content: result.text,
-    });
-    this.bus.publish({ type: "assistant_message", channel: event.channel, channelRef: event.channelRef, text: result.text, ts: this.now() });
   }
 
   async closeIdleSessionIfNeeded(): Promise<void> {

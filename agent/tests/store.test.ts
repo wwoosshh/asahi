@@ -48,4 +48,12 @@ describe("Repo", () => {
     repo.deleteSetting("session.id");
     expect(repo.getSetting("session.id")).toBeNull();
   });
+
+  it("미처리 user_message를 조회하고 완료 표시한다", () => {
+    const id1 = repo.insertEvent({ ts: 1, type: "user_message", content: "a", processed: false });
+    repo.insertEvent({ ts: 2, type: "user_message", content: "b" }); // 기본 processed=true
+    expect(repo.unprocessedUserMessages().map((e) => e.id)).toEqual([id1]);
+    repo.markProcessed(id1);
+    expect(repo.unprocessedUserMessages()).toHaveLength(0);
+  });
 });

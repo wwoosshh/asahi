@@ -41,5 +41,10 @@ export function openDb(dbPath: string): Database.Database {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.exec(SCHEMA);
+  // 마이그레이션: 크래시 복구용 processed 컬럼 (기존 DB에도 안전하게 추가)
+  const columns = db.pragma("table_info(events)") as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === "processed")) {
+    db.exec("ALTER TABLE events ADD COLUMN processed INTEGER NOT NULL DEFAULT 1");
+  }
   return db;
 }

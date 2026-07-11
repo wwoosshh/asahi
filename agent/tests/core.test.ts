@@ -121,4 +121,21 @@ describe("AgentCore", () => {
     await t.core.drain();
     expect(t.calls[2].resume).toBeUndefined();
   });
+
+  it("부팅 시 미처리 메시지를 재개해 처리한다", async () => {
+    const t = setup();
+    t.repo.insertEvent({ ts: 1, type: "user_message", channel: "discord", channelRef: "c1", content: "크래시 전 메시지", processed: false });
+    await t.core.recoverPending();
+    await t.core.drain();
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0].prompt).toContain("크래시 전 메시지");
+    expect(t.repo.unprocessedUserMessages()).toHaveLength(0);
+  });
+
+  it("정상 처리된 메시지는 완료 표시된다", async () => {
+    const t = setup();
+    t.bus.publish(userMsg("안녕", 1));
+    await t.core.drain();
+    expect(t.repo.unprocessedUserMessages()).toHaveLength(0);
+  });
 });
