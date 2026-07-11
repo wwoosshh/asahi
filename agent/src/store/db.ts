@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { NEW_SCHEMA, SCHEMA_VERSION } from "./schema.js";
 
 export type { Database } from "better-sqlite3";
 
@@ -46,5 +47,18 @@ export function openDb(dbPath: string): Database.Database {
   if (!columns.some((c) => c.name === "processed")) {
     db.exec("ALTER TABLE events ADD COLUMN processed INTEGER NOT NULL DEFAULT 1");
   }
+  // v2: 새 정규화 스키마를 덧붙이고(기존 테이블 유지) 스키마 버전을 기록한다.
+  db.exec(NEW_SCHEMA);
+  setSchemaVersion(db, Math.max(getSchemaVersion(db), SCHEMA_VERSION));
   return db;
+}
+
+export function getSchemaVersion(db: Database.Database): number {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
+  return row ? Number(row.value) : 0;
+}
+
+export function setSchemaVersion(db: Database.Database, v: number): void {
+  db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .run(String(v));
 }
