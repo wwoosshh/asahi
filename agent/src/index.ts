@@ -1,8 +1,10 @@
+import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import { loadConfig } from "./config.js";
 import { EventBus } from "./events/bus.js";
 import { openDb } from "./store/db.js";
+import { migrateFromPhase1 } from "./store/migrate.js";
 import { UsersRepo } from "./store/usersRepo.js";
 import { ConversationsRepo } from "./store/conversationsRepo.js";
 import { ParticipantsRepo } from "./store/participantsRepo.js";
@@ -22,7 +24,8 @@ async function main() {
   const config = loadConfig();
 
   const db = openDb(path.join(config.dataDir, "agent.db"));
-  // TODO(Task 6): migrateFromPhase1(db, { ownerId, memoryDir }) 1회 호출.
+  // 1단계 데이터(events/summaries/settings/마크다운 기억)를 v2 스키마로 멱등 이전(1회).
+  migrateFromPhase1(db, { ownerId: config.ownerId, memoryDir: config.memoryDir });
 
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
@@ -39,8 +42,9 @@ async function main() {
   users.upsert(config.ownerId, { role: "owner" });
 
   const bus = new EventBus();
-  // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다(Task 6 에서 확정).
-  const agentCwd = process.cwd();
+  // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다 — 에이전트가 소스 트리를 훑지 않도록(1단계 점검 지적).
+  const agentCwd = path.resolve(config.dataDir, "..", "agent-cwd");
+  fs.mkdirSync(agentCwd, { recursive: true });
   const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users });
   const core = new AgentCore({ bus, config, runTurn, repos, agentCwd });
   core.start();
