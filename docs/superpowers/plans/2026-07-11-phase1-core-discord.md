@@ -1197,9 +1197,10 @@ describe("chunkMessage", () => {
   });
 
   it("줄바꿈 경계를 우선해서 자른다", () => {
-    const line = "한 줄입니다.\n";
-    const text = line.repeat(200); // 2600자
+    const line = "한 줄입니다.\n"; // 8자 ("한 줄입니다." 7자 + \n)
+    const text = line.repeat(400); // 3200자 (2000 초과 → 분할이 실제로 발생)
     const chunks = chunkMessage(text, 2000);
+    expect(chunks.length).toBeGreaterThan(1);
     expect(chunks[0].endsWith("한 줄입니다.")).toBe(true);
   });
 
