@@ -139,16 +139,33 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     expect(t.published.find((e) => e.type === "system_notice")?.text).toContain("한도");
   });
 
-  it("전역 한도의 소유자 예약분: 손님은 global-reserve 까지, 소유자는 예약분까지 접근", async () => {
-    const t = setup({ config: { maxTurnsPerHourGlobal: 2, ownerReserve: 1, maxTurnsPerHourPerUser: 99 } });
-    pub(t.bus, dmHint("guest", "allowed"), "1", 1);       // global 1/2, 손님 cap=1
+  it("소유자는 유저별·전역 한도를 전혀 받지 않는다(무제한)", async () => {
+    const t = setup({ config: { maxTurnsPerHourPerUser: 1, maxTurnsPerHourGlobal: 1 } });
+    for (let i = 0; i < 4; i++) {
+      pub(t.bus, dmHint("owner", "owner"), `m${i}`, i + 1);
+      await t.core.drain();
+    }
+    expect(t.calls.length).toBe(4); // 1/1 한도를 무시하고 4번 모두 처리
+  });
+
+  it("손님 전역 상한은 globalLimit 이며, 소유자 사용량은 손님 카운트에 영향을 주지 않는다", async () => {
+    const t = setup({ config: { maxTurnsPerHourGlobal: 2, maxTurnsPerHourPerUser: 99 } });
+    // 소유자가 여러 번 사용해도(무제한·카운트 제외) 손님 몫에 영향 없음
+    for (let i = 0; i < 3; i++) {
+      pub(t.bus, dmHint("owner", "owner"), `o${i}`, i + 1);
+      await t.core.drain();
+    }
+    const guestCalls = () => t.calls.filter((c) => c.context.userId !== "owner").length;
+    // 손님 두 명이 전역 2까지
+    pub(t.bus, dmHint("guest", "allowed"), "g1", 10);
     await t.core.drain();
-    pub(t.bus, dmHint("guest2", "allowed"), "2", 2);      // 손님 cap 도달 → 거부
+    pub(t.bus, dmHint("guest2", "allowed"), "g2", 11);
     await t.core.drain();
-    expect(t.calls.length).toBe(1);
-    pub(t.bus, dmHint("owner", "owner"), "3", 3);         // 소유자는 예약분(global 2) 접근 → 성공
+    expect(guestCalls()).toBe(2);
+    // 손님 전역 상한(2) 도달 → 세 번째 손님 발화는 막힘
+    pub(t.bus, dmHint("guest", "allowed"), "g3", 12);
     await t.core.drain();
-    expect(t.calls.length).toBe(2);
+    expect(guestCalls()).toBe(2);
   });
 
   it("유휴 이내면 resume, 유휴가 지나면 새 세션으로 시작한다", async () => {

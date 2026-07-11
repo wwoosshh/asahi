@@ -126,15 +126,18 @@ export class AgentCore {
       // manage_access 로 손님에게 'owner' 역할이 부여되어도 신원이 아니면 특권을 갖지 못하게 한다.
       const isOwner = userId === this.ownerId;
 
-      // 한도: 이 턴을 원자적으로 예약(유저별+전역, 소유자 예약분). 실패면 안내 후 종료.
-      const reserved = this.repos.turns.reserve({
-        userId, conversationId: conv.id, kind: "message", ts: this.now(),
-        perUserLimit: this.config.maxTurnsPerHourPerUser, globalLimit: this.config.maxTurnsPerHourGlobal,
-        ownerReserve: this.config.ownerReserve, isOwner, windowMs: HOUR_MS,
-      });
-      if (!reserved) {
-        this.notify(conv, "구독 한도 보호를 위해 잠시 쉬고 있어요. 1시간 안에 다시 시도해 주세요.");
-        return;
+      // 한도: 소유자는 어떤 한도도 받지 않는다(예약 생략 → turns 미기록 → 손님 카운트에도 영향 없음).
+      // 손님만 유저별+전역 한도로 원자 예약한다(구독 보호는 손님에게만 적용). 실패면 안내 후 종료.
+      if (!isOwner) {
+        const reserved = this.repos.turns.reserve({
+          userId, conversationId: conv.id, kind: "message", ts: this.now(),
+          perUserLimit: this.config.maxTurnsPerHourPerUser, globalLimit: this.config.maxTurnsPerHourGlobal,
+          ownerReserve: 0, isOwner: false, windowMs: HOUR_MS,
+        });
+        if (!reserved) {
+          this.notify(conv, "구독 한도 보호를 위해 잠시 쉬고 있어요. 1시간 안에 다시 시도해 주세요.");
+          return;
+        }
       }
 
       // 세션: 열린 세션이 유휴 이내면 resume(새 메시지만), 아니면 새 세션(기억 컨텍스트 주입).
@@ -205,11 +208,11 @@ export class AgentCore {
 
     const isOwner = conv.primaryUserId === this.ownerId;
     const role: Role = isOwner ? "owner" : "allowed";
-    // 요약도 실제 LLM 턴이므로 한도에 포함한다. 초과면 요약은 건너뛰되 세션은 반드시 정리한다.
-    const reserved = this.repos.turns.reserve({
+    // 소유자 대화의 요약도 무제한. 손님 대화 요약만 한도에 포함(초과면 요약은 건너뛰되 세션은 반드시 정리).
+    const reserved = isOwner || this.repos.turns.reserve({
       userId: null, conversationId: conv.id, kind: "summary", ts: this.now(),
       perUserLimit: this.config.maxTurnsPerHourPerUser, globalLimit: this.config.maxTurnsPerHourGlobal,
-      ownerReserve: this.config.ownerReserve, isOwner, windowMs: HOUR_MS,
+      ownerReserve: 0, isOwner: false, windowMs: HOUR_MS,
     });
     if (reserved) {
       const toMessageId = this.repos.messages.recent(conv.id, 1)[0]?.id ?? conv.firstMessageId ?? 0;
