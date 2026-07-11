@@ -11,7 +11,7 @@ import { SummariesRepo } from "./store/summariesRepo.js";
 import { MemoriesRepo } from "./store/memoriesRepo.js";
 import { TurnsRepo } from "./store/turnsRepo.js";
 import { AgentCore } from "./core/core.js";
-import { runAgentTurn } from "./core/agent.js";
+import { makeRunAgentTurn } from "./core/agent.js";
 import { DiscordAdapter } from "./adapters/discord.js";
 
 // 비밀값(.env)은 리포 루트(agent/ 바깥, data/ 와 같은 위치)에서 읽는다.
@@ -41,7 +41,8 @@ async function main() {
   const bus = new EventBus();
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다(Task 6 에서 확정).
   const agentCwd = process.cwd();
-  const core = new AgentCore({ bus, config, runTurn: runAgentTurn, repos, agentCwd });
+  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users });
+  const core = new AgentCore({ bus, config, runTurn, repos, agentCwd });
   core.start();
 
   const discord = new DiscordAdapter({ bus, config, users, conversations });
