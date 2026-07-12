@@ -13,6 +13,8 @@ Asahi가 자기 자신의 데이터 구조와 실제 내용을 **직접 읽어**
 - 소유자 DM에서 "내 기억 목록 보여줘"·"대화 통계"·"이 테이블 구조" 등에 db_schema/db_query로 실측 응답.
 - 읽기 전용이 다층으로 보장되어 어떤 경우에도 쓰기가 일어나지 않는다.
 - 소유자 신원 전용 — 손님·서버·(워커의 손님 turn)에는 절대 노출되지 않는다.
+- **자기 런타임 사양을 안다**: "너 어떤 모델로 돌아가?"에 실측/설정값으로 답한다(모델·SDK 버전·배포 대상·한도).
+- **실행 모델을 Opus 4.8로 고정**(env `ANTHROPIC_MODEL`로 재정의 가능).
 
 ## 2. 배경·현재 상태
 
@@ -30,6 +32,15 @@ Asahi가 자기 자신의 데이터 구조와 실제 내용을 **직접 읽어**
 - 인자: 읽기 전용 SELECT 한 문장.
 - 실행 후 결과 행을 표 형태 텍스트로 반환(행수·셀 길이 제한, 초과 시 "…외 N행" 안내).
 - 용도: 실제 데이터 조회("내 기억 목록", "최근 대화 수", 임의 통계).
+
+### 3.3 `runtime_info()`
+- 인자 없음. 자기 런타임 사양을 텍스트로 반환: **모델**(설정값 `config.model`, 그리고 가능하면 SDK init 메시지에서 캡처한 실제 모델), **SDK 버전**, **배포 대상**(local/cloud), **maxTurns(30)**, **한도**(손님 유저별/전역, 소유자 무제한).
+- 용도: "너 어떤 모델·설정으로 돌아가?"에 정직히 응답. 자기 능력의 한 축(어떤 엔진·제약으로 동작하는지).
+
+## 3.5 모델 구성 (Opus 4.8 고정)
+- `config.model`: env `ANTHROPIC_MODEL`, **기본 `claude-opus-4-8`**. `query()` 옵션의 `model`로 전달(현재는 미지정이라 구독 기본값으로 돎).
+- 봇(index.ts)·워커(jobRunner) 공용 러너(`makeRunAgentTurn`)에 모델을 전달해 **양쪽 동일**하게 적용.
+- 주의: 구독(OAuth 토큰) 플랜이 Opus 접근을 허용해야 실제로 Opus 4.8로 돈다. 미허용/미인식 시 SDK 동작은 실 배포 스모크로 확인(필요 시 env로 alias `opus` 또는 다른 모델로 조정). Opus 는 응답이 느리고 구독 사용량 소모가 큼(운영상 감안).
 
 ## 4. 안전 모델 (다층 방어 — 하나만 뚫려도 다음이 막음)
 
@@ -59,10 +70,11 @@ Asahi가 자기 자신의 데이터 구조와 실제 내용을 **직접 읽어**
 - **`agent/src/store/introspectRepo.ts`(신규)**: `IntrospectRepo(db)`:
   - `schema(): Promise<string>` — information_schema 조회 → 텍스트.
   - `readOnlyQuery(sql: string, opts?): Promise<{ rows: Record<string, unknown>[]; truncatedRows: number }>` — READ ONLY 트랜잭션 + timeout + 행 상한.
-- **`agent/src/core/agent.ts`**: `ToolRepos`에 `introspect: IntrospectRepo` 추가(ToolCtx 로 전달).
-- **`agent/src/core/tools.ts`**: `buildTools`에 `db_schema`·`db_query` 도구·핸들러 추가(핸들러는 `ctx.isOwner` 확인 후 `assertReadOnlySql` → `ctx.repos.introspect.*`). `allowedToolsFor` 의 소유자 DM(cloud·local) 브랜치에 두 도구 추가.
-- **`agent/src/core/persona.ts`**: 소유자 DM 능력 블록에 능력 안내 한 줄.
-- **`agent/src/index.ts`·`agent/src/worker/jobRunner.ts`(및 worker.ts)**: `introspect: new IntrospectRepo(db)` 를 repos 에 배선.
+- **`agent/src/config.ts`**: `model: string` 필드 추가(env `ANTHROPIC_MODEL`, 기본 `claude-opus-4-8`).
+- **`agent/src/core/agent.ts`**: `ToolRepos`에 `introspect: IntrospectRepo` 추가(ToolCtx 로 전달). `makeRunAgentTurn(repos, deployTarget, model, sdkVersion)` 로 확장 → `query()` 옵션에 `model` 전달. init 메시지(`subtype:"init"`)에서 실제 `model` 을 캡처해 `TurnResult`(또는 ToolCtx 경유)로 넘겨 runtime_info 가 실측 모델을 보고할 수 있게 한다(불가하면 최소한 console 로깅하고 runtime_info 는 설정값 보고).
+- **`agent/src/core/tools.ts`**: `buildTools`에 `db_schema`·`db_query`·`runtime_info` 도구·핸들러 추가(db_* 핸들러는 `ctx.isOwner` 확인 후 `assertReadOnlySql` → `ctx.repos.introspect.*`; runtime_info 는 주입된 런타임 사양 반환). `allowedToolsFor` 의 소유자 DM(cloud·local) 브랜치에 세 도구 추가.
+- **`agent/src/core/persona.ts`**: 소유자 DM 능력 블록에 능력 안내 한 줄(자기 구조·런타임을 조회해 실측으로 답하라).
+- **`agent/src/index.ts`·`agent/src/worker/jobRunner.ts`(및 worker.ts)**: `introspect: new IntrospectRepo(db)` 배선 + `makeRunAgentTurn` 에 `config.model` 전달(워커도 동일 모델).
 
 ### 7.2 데이터 흐름
 소유자 DM turn → allowedToolsFor 가 db_query 노출 → 모델이 db_query(sql) 호출 → 핸들러가 isOwner 확인 → assertReadOnlySql → IntrospectRepo.readOnlyQuery(READ ONLY tx) → 행 절단 후 텍스트 반환.
@@ -76,9 +88,10 @@ Asahi가 자기 자신의 데이터 구조와 실제 내용을 **직접 읽어**
 - **핸들러 유닛**: 손님/서버 ctx 에서 도구가 노출되지 않음(allowedToolsFor), 소유자 아닌 ctx 에서 핸들러가 거부, 결과 행 상한·셀 절단.
 - **pg-mem 한계 주의**: pg-mem 이 `SET TRANSACTION READ ONLY`·`statement_timeout`·`information_schema` 를 완전히 흉내내지 못할 수 있다. READ ONLY 강제·schema 조회의 **실제 동작은 실 Supabase 스모크로 검증**(쓰기 시도 거부·information_schema 반환·timeout). 계획 단계에서 작은 스파이크로 pg-mem 지원 범위를 먼저 확인하고, 미지원이면 그 경로는 실 Postgres 전용으로 표시.
 - **실 Supabase 스모크**: db_schema 반환, 정상 SELECT, 쓰기 SQL 이 READ ONLY tx 로 거부, timeout 동작.
+- **runtime_info·모델**: runtime_info 가 설정 모델/SDK/배포/한도를 반환하는지 유닛. `config.model` 기본값(`claude-opus-4-8`)·env 재정의 유닛. **실제 Opus 4.8 구동은 배포 스모크로 확인**(init 모델 로깅·"어떤 모델?" 응답).
 
 ## 10. 범위·비범위
-**포함**: db_schema·db_query 도구 + 다층 안전 + 소유자 전용 배선(봇·워커) + persona 능력 안내.
+**포함**: db_schema·db_query·runtime_info 도구 + 다층 안전 + 소유자 전용 배선(봇·워커) + persona 능력 안내 + **모델 구성(Opus 4.8 기본, env 재정의)** + init 실측 모델 캡처(가능 시).
 
 **비범위(후속)**:
 - B(작업 관찰: actions 로깅 + recent_actions) — 이미 설계됨, 다음 사이클.
@@ -91,6 +104,8 @@ Asahi가 자기 자신의 데이터 구조와 실제 내용을 **직접 읽어**
 - **정보 노출 범위**: 소유자가 모든 데이터 조회 가능(설계상 허용). 문서화.
 - **pg-mem 검증 공백**: READ ONLY 강제·information_schema·timeout 은 실 Postgres 에서만 확실 → 스모크 필수.
 - **대량 결과**: 행 상한·셀 절단·timeout 으로 방어. 그래도 넓은 쿼리는 느릴 수 있음(소유자 전용이라 남용 위험은 낮음).
+- **Opus 4.8 가용성·비용**: 구독 플랜이 Opus 접근을 허용해야 함. 미허용 시 SDK 동작(에러/폴백)을 배포 스모크로 확인하고 env 로 조정. Opus 는 지연↑·구독 사용량 소모↑ — 상주 봇 특성상 감안(필요 시 손님 턴은 다른 모델 등 후속 최적화 여지, 이번 범위 밖).
+- **런타임 인지 정확도**: runtime_info 가 설정값을 보고할 때 실제 실행 모델과 다를 수 있음(구독 폴백 등) → init 실측 모델 캡처로 최대한 실제값 보고, 불가 시 "설정상" 명시.
 
 ## 12. 다음 단계
 1. 이 스펙 사용자 리뷰.
