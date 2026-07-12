@@ -195,3 +195,24 @@ describe("processJob — 워커의 job 처리 핵심(순수 로직, runTurn 은 
     expect(after?.error).toContain("예상 못한 오류");
   });
 });
+
+describe("processJob — 친근도(rapportStage) 주입", () => {
+  it("소유자 PC작업 턴에 소유자 반말 관계 블록과 친근도 문구가 담긴다", async () => {
+    const t = await setup();
+    // 소유자 전용 DM 대화 생성
+    const ownerConv = await t.repos.conversations.create({
+      kind: "dm", discordChannelId: "dm-owner", primaryUserId: OWNER_ID, isPrivate: true, lastActiveTs: 1000,
+    });
+    // owner user 메시지 10개 심어 stage 1(익숙)로 만든다
+    for (let i = 0; i < 10; i++) {
+      await t.repos.messages.insert({ conversationId: ownerConv, ts: 10 + i, role: "user", userId: OWNER_ID, content: `m${i}` });
+    }
+    const id = await t.repos.jobs.enqueue({ userId: OWNER_ID, conversationId: ownerConv, discordChannelId: "dm-owner", userMessage: "파일 봐줘", ts: 100 });
+    const job = (await t.repos.jobs.claimNext(OWNER_ID, 100))!;
+
+    await processJob(t.deps, job);
+
+    expect(t.calls[0].systemPrompt).toMatch(/반말/);
+    expect(t.calls[0].systemPrompt).toMatch(/익숙/);
+  });
+});

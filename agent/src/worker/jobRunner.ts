@@ -6,7 +6,7 @@ import type { SummariesRepo } from "../store/summariesRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { TurnRunner, TurnContext, TurnResult, ProgressUpdate } from "../core/agent.js";
-import { buildSystemPrompt } from "../core/persona.js";
+import { buildSystemPrompt, deriveRapportStage } from "../core/persona.js";
 import { formatProgress } from "../core/core.js";
 import { buildContextBlock, isSessionNotFound } from "../core/turnPrep.js";
 
@@ -74,7 +74,8 @@ export async function processJob(deps: ProcessJobDeps, job: Job): Promise<void> 
     const context: TurnContext = {
       role, isPrivate: true, isOwner, userId: job.userId, conversationId: conv.id, ownWorkstation: true,
     };
-    const systemPrompt = buildSystemPrompt({ role, isPrivate: true, isOwner, deployTarget: "local" });
+    const rapportStage = deriveRapportStage(await repos.messages.countUserMessages(job.userId));
+    const systemPrompt = buildSystemPrompt({ role, isPrivate: true, isOwner, deployTarget: "local", rapportStage });
     const onProgress = (u: ProgressUpdate) => {
       void repos.jobs.setProgress(job.id, formatProgress(u)).catch((err) => {
         console.error("[worker] 진행 상태 기록 실패:", err);
