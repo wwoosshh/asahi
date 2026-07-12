@@ -1,9 +1,11 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { AllowedDirsRepo } from "../store/allowedDirsRepo.js";
 import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx } from "./tools.js";
+import { decidePathPermission, isPathGatedTool, extractCandidatePaths, resolveRealOrNearestAncestor } from "./pathPermission.js";
 
 // 현재 턴의 상대·대화 컨텍스트. 이걸로 role·is_private 별 도구셋(allowedTools)을 정한다(§7.1).
 export type TurnContext = { role: Role; isPrivate: boolean; isOwner: boolean; userId: string; conversationId: number };
@@ -79,6 +81,23 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
     };
     const server = buildTools(ctx);
     const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner);
+    // 파일/Bash 는 canUseTool(decidePathPermission) 을 반드시 거치도록 bare 사전승인 목록에서 뺀다 —
+    // SDK 는 allowedTools 에 괄호 없는 "이름 그대로" 항목이 있으면 canUseTool 을 아예 호출하지 않고
+    // 통과시켜 버린다(경로 검사가 완전히 우회됨). mcp__asahi__* 도구는 그대로 bare 사전승인 유지.
+    const preApprovedTools = allowedTools.filter((name) => !isPathGatedTool(name));
+    // 이 턴에서 실제로 쓸 수 있는 내장 도구(Read/Write/Edit/Glob/Grep/Bash) 기본 집합을 role 별로 제한한다.
+    // (query() 의 canUseTool 은 파일/Bash 가 아닌 도구는 항상 allow 하므로, 이 제한이 없으면 permissionMode
+    // 를 "default" 로 바꾼 뒤 WebSearch/Task 등 기존에 쓸 수 없던 내장 도구까지 새로 열리게 된다.)
+    const builtinTools = allowedTools.filter(isPathGatedTool);
+    const isOwnerDm = req.context.isOwner && req.context.isPrivate;
+
+    const canUseTool: CanUseTool = async (toolName, input, options) => {
+      const allowedDirs = repos.allowedDirs.list();
+      const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath);
+      const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
+      const decision = decidePathPermission(toolName, resolvedPaths, { isOwnerDm, allowedDirs });
+      return decision.behavior === "allow" ? { behavior: "allow" } : { behavior: "deny", message: decision.message };
+    };
 
     let sessionId: string | undefined;
     let text = "";
@@ -92,9 +111,12 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
         cwd: req.cwd,
         systemPrompt: req.systemPrompt,
         resume: req.resume,
-        allowedTools,
+        allowedTools: preApprovedTools,
+        tools: builtinTools,
         mcpServers: { [TOOL_SERVER]: server },
-        permissionMode: "dontAsk",
+        permissionMode: "default",
+        canUseTool,
+        additionalDirectories: isOwnerDm ? repos.allowedDirs.list() : [],
         maxTurns: 30,
       },
     })) {

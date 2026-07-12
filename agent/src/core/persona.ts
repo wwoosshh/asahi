@@ -27,7 +27,8 @@ export function buildSystemPrompt(ctx: PersonaContext): string {
     ctx.isOwner && ctx.isPrivate
       ? `## 능력
 - 소유자와의 1:1 비공개 대화입니다. 파일 도구로 PC 작업을 할 수 있고, manage_access 로 접근 권한을 관리할 수 있습니다.
-- manage_access 는 소유자가 직접 지시할 때만, 디스코드 숫자 ID(@멘션)로만 실행하세요.`
+- manage_access 는 소유자가 직접 지시할 때만, 디스코드 숫자 ID(@멘션)로만 실행하세요.
+- 파일·셸(Bash) 작업은 allow_dir 로 등록된 허용 폴더 안에서만 가능합니다. 그 밖의 경로는 접근이 거부됩니다. 아직 허용된 폴더가 없다면 먼저 allow_dir 로 등록해 달라고 안내하세요.`
       : ctx.isPrivate
         ? `## 능력
 - 대화와 본인 기억(remember/recall)만 사용할 수 있습니다. PC·파일 작업, 접근 권한 변경은 할 수 없습니다.`
