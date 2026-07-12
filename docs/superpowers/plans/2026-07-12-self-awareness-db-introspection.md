@@ -159,7 +159,8 @@ Expected: FAIL — 모듈 없음.
 ```ts
 // 읽기 전용 SQL 가드(순수). 완전한 SQL 파서가 아니라 "명백한 쓰기/다중문을 빠르게 거부"하는
 // 1차 방어다 — 진짜 방어선은 IntrospectRepo.readOnlyQuery 의 Postgres READ ONLY 트랜잭션이다.
-const WRITE_STARTS = ["INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE", "GRANT", "REVOKE", "COPY", "CALL", "DO", "SET", "EXPLAIN", "VACUUM", "REINDEX", "COMMENT", "LOCK", "REFRESH"];
+// (예: `WITH x AS (DELETE … RETURNING *) SELECT …` 같이 문두가 WITH 인 쓰기 CTE 는 이 pre-check 를
+//  통과하지만, READ ONLY 트랜잭션이 실행 시점에 거부한다 — 그게 핵심 방어다.)
 
 // 주석(줄 -- / 블록 /* */) 제거 후 앞뒤 공백 정리.
 function stripComments(sql: string): string {
@@ -176,9 +177,6 @@ export function assertReadOnlySql(sql: string): void {
   if (firstWord !== "SELECT" && firstWord !== "WITH") {
     throw new Error("읽기 전용 SELECT(또는 WITH … SELECT)만 실행할 수 있어요.");
   }
-  // WITH 안에 쓰기 CTE(예: WITH x AS (DELETE …))가 섞이는 것을 막는다: 최상위 토큰 스캔은 아니지만,
-  // 진짜 방어는 READ ONLY 트랜잭션이므로 여기선 명백한 쓰기 키워드가 문두에 오는 것만 본다.
-  void WRITE_STARTS; // 문두 검사는 위 firstWord 로 충분(SELECT/WITH 만 통과) — 목록은 문서·확장용.
 }
 
 export function formatQueryResult(rows: Record<string, unknown>[], truncated: number, opts: { maxCell?: number } = {}): string {
