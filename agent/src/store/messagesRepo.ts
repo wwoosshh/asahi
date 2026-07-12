@@ -46,4 +46,13 @@ export class MessagesRepo {
   async markProcessed(id: number): Promise<void> {
     await this.db.query("UPDATE messages SET processed = TRUE WHERE id = $1", [id]);
   }
+
+  // 친근도(rapportStage) 파생 소스: 그 사용자의 user 역할 메시지 누적 수.
+  async countUserMessages(userId: string): Promise<number> {
+    const r = await this.db.query(
+      "SELECT COUNT(*) AS n FROM messages WHERE user_id = $1 AND role = 'user'",
+      [userId],
+    );
+    return Number((r.rows[0] as { n: number | string }).n);
+  }
 }
