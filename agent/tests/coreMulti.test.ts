@@ -21,7 +21,7 @@ const flush = async () => {
   for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r));
 };
 
-async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" } = {}) {
+async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" | "resume-fails" } = {}) {
   const db = await openTestDb();
   const repos = {
     users: new UsersRepo(db), conversations: new ConversationsRepo(db), participants: new ParticipantsRepo(db),
@@ -45,6 +45,11 @@ async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "man
     calls.push(req);
     req.onProgress?.({ kind: "answering" }); // 코어가 onProgress 를 progress 이벤트로 발행하는지 확인용
     if (mode === "throw") return Promise.reject(new Error("SDK 프로세스 오류(테스트용)"));
+    if (mode === "resume-fails") {
+      // resume 을 쓴 턴은 "세션 없음"으로 실패(클라우드 컨테이너 재시작 등), 새 세션 턴은 성공.
+      if (req.resume) return Promise.reject(new Error(`Claude Code returned an error result: No conversation found with session ID: ${req.resume}`));
+      return Promise.resolve(nextResult);
+    }
     if (mode === "immediate") return Promise.resolve(nextResult);
     return new Promise((res) => resolvers.push(() => res(nextResult)));
   };
@@ -199,6 +204,25 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     pub(t.bus, dmHint("guest", "allowed"), "g3", 12);
     await t.core.drain();
     expect(guestCalls()).toBe(2);
+  });
+
+  it("resume 세션이 없으면(클라우드 재시작 등) 새 세션 + 기억 컨텍스트로 재시도한다", async () => {
+    const t = await setup({ mode: "resume-fails" });
+    // 첫 메시지: resume 없이 새 세션 → 성공(세션 s1 저장)
+    pub(t.bus, dmHint("owner", "owner"), "1", t.now());
+    await t.core.drain();
+    expect(t.calls.length).toBe(1);
+    expect(t.calls[0].resume).toBeUndefined();
+    // 두 번째: resume s1 시도 → "세션 없음" 실패 → 새 세션으로 재시도 성공
+    pub(t.bus, dmHint("owner", "owner"), "2", t.now());
+    await t.core.drain();
+    expect(t.calls.length).toBe(3);
+    expect(t.calls[1].resume).toBe("s1");        // resume 시도(실패)
+    expect(t.calls[2].resume).toBeUndefined();   // 새 세션 재시도
+    expect(t.calls[2].prompt).toContain("기억 컨텍스트");
+    // 최종 답변이 정상 발행되고, 오류 안내가 나가지 않는다
+    expect(t.published.some((e) => e.type === "assistant_message")).toBe(true);
+    expect(t.published.find((e) => e.type === "system_notice" && e.text.includes("오류"))).toBeUndefined();
   });
 
   it("유휴 이내면 resume, 유휴가 지나면 새 세션으로 시작한다", async () => {

@@ -1,6 +1,6 @@
 import type { EventBus, UserMessageEvent, ConversationHint } from "../events/bus.js";
 import type { Config } from "../config.js";
-import type { TurnRunner, TurnContext, ProgressUpdate } from "./agent.js";
+import type { TurnRunner, TurnContext, TurnResult, ProgressUpdate } from "./agent.js";
 import { buildSystemPrompt } from "./persona.js";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
@@ -27,6 +27,12 @@ export function formatProgress(u: ProgressUpdate): string {
     case "answering":
       return "답변 작성 중";
   }
+}
+
+// SDK 가 resume 세션을 못 찾을 때의 에러(클라우드 컨테이너 재배포로 세션 저장소가 초기화된 경우 등).
+function isSessionNotFound(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("No conversation found with session ID");
 }
 
 export type CoreRepos = {
@@ -197,14 +203,31 @@ export class AgentCore {
       }
 
       const context: TurnContext = { role, isPrivate: conv.isPrivate, isOwner, userId, conversationId: conv.id };
-      const result = await this.runTurn({
-        prompt,
-        systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget }),
-        resume, cwd: this.agentCwd, context,
-        onProgress: (u) => {
-          this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
-        },
-      });
+      const systemPrompt = buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget });
+      const onProgress = (u: ProgressUpdate) => {
+        this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
+      };
+
+      let result: TurnResult;
+      try {
+        result = await this.runTurn({ prompt, systemPrompt, resume, cwd: this.agentCwd, context, onProgress });
+      } catch (err) {
+        if (resume && isSessionNotFound(err)) {
+          // resume 세션이 SDK 쪽에 없음(클라우드 컨테이너 재배포/재시작으로 세션 저장소가 초기화됨 등)
+          // → 그 세션을 버리고 새 세션 + 기억 컨텍스트로 재시도한다(대화 연속성 유지).
+          console.warn("[core] resume 세션 없음 — 새 세션으로 재시도:", conv.id);
+          await this.repos.conversations.setSession(conv.id, null, this.now());
+          const fresh = (await this.repos.conversations.getById(convId)) ?? conv;
+          const retryPrompt = `${await this.buildContextBlock(fresh, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
+          await this.repos.conversations.setFirstMessageId(conv.id, messageId);
+          if (conv.isPrivate && conv.primaryUserId === this.ownerId) {
+            await this.repos.conversations.setPrivateMemoryLoaded(conv.id, true);
+          }
+          result = await this.runTurn({ prompt: retryPrompt, systemPrompt, resume: undefined, cwd: this.agentCwd, context, onProgress });
+        } else {
+          throw err;
+        }
+      }
 
       if (!result.ok) {
         await this.notify(conv, `비서 처리 중 오류가 있었어요: ${result.text}`);
