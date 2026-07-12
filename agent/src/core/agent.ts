@@ -92,7 +92,7 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
     const isOwnerDm = req.context.isOwner && req.context.isPrivate;
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
-      const allowedDirs = repos.allowedDirs.list();
+      const allowedDirs = await repos.allowedDirs.list();
       const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath, req.cwd);
       const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
       // 보안리뷰 #2: dangerouslyDisableSandbox 로 남은 봉쇄까지 무력화하는 걸 canUseTool 이 항상 막는다.
@@ -106,6 +106,7 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
     let ok = false;
     // 턴 하나 동안 tool_use_id → 짧은 도구명(진행 이벤트용). onProgress 가 없으면 추출도 하지 않는다.
     const pendingToolNames = new Map<string, string>();
+    const additionalDirectories = isOwnerDm ? await repos.allowedDirs.list() : [];
 
     for await (const message of query({
       prompt: req.prompt,
@@ -118,7 +119,7 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
         mcpServers: { [TOOL_SERVER]: server },
         permissionMode: "default",
         canUseTool,
-        additionalDirectories: isOwnerDm ? repos.allowedDirs.list() : [],
+        additionalDirectories,
         maxTurns: 30,
       },
     })) {

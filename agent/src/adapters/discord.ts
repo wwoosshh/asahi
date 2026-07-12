@@ -191,8 +191,8 @@ export class DiscordAdapter {
       messageId: message.id,
     };
 
-    const role = this.users.getRole(incoming.userId);
-    const existing = this.conversations.getByChannelId(incoming.channelId);
+    const role = await this.users.getRole(incoming.userId);
+    const existing = await this.conversations.getByChannelId(incoming.channelId);
     const decision = decideRoute(incoming, role, existing !== null);
     if (decision.kind === "ignore") return;
     if (role === "blocked") return; // 타입 좁히기용 방어(decideRoute 가 이미 걸러냄)
@@ -244,7 +244,7 @@ export class DiscordAdapter {
     common: { guildId?: string; parentChannelId?: string; userId: string; role: "owner" | "allowed"; discordMessageId: string },
   ): Promise<ConversationHint | null> {
     // 멱등: 이 트리거 메시지로 이미 만든 대화가 있으면 그 스레드 재사용(스레드 재생성 금지).
-    const already = this.conversations.getByOriginMessageId(i.messageId);
+    const already = await this.conversations.getByOriginMessageId(i.messageId);
     if (already) {
       return { ...common, kind: "thread", discordChannelId: already.discordChannelId, originMessageId: i.messageId, isPrivate: false, primaryUserId: i.userId };
     }

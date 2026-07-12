@@ -1,13 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig } from "../src/config.js";
 
-const base = { DISCORD_TOKEN: "tok", DISCORD_OWNER_ID: "123" };
+const base = { DISCORD_TOKEN: "tok", DISCORD_OWNER_ID: "123", DATABASE_URL: "postgres://localhost/test" };
 
 describe("loadConfig", () => {
   it("필수값이 있으면 기본값과 함께 로드된다", () => {
     const c = loadConfig(base);
     expect(c.discordToken).toBe("tok");
     expect(c.ownerId).toBe("123");
+    expect(c.databaseUrl).toBe("postgres://localhost/test");
     expect(c.channelId).toBeUndefined();
     expect(c.sessionIdleMinutes).toBe(30);
     expect(c.maxTurnsPerHour).toBe(30);
@@ -44,6 +45,11 @@ describe("loadConfig", () => {
 
   it("필수값이 없으면 무엇이 빠졌는지 알려주며 실패한다", () => {
     expect(() => loadConfig({})).toThrow(/DISCORD_TOKEN/);
+  });
+
+  it("DATABASE_URL 이 없으면 명확히 실패한다", () => {
+    const { DATABASE_URL, ...withoutDbUrl } = base;
+    expect(() => loadConfig(withoutDbUrl)).toThrow(/DATABASE_URL/);
   });
 
   it("숫자 env 가 잘못되면(오타·0·음수) 시작 시 명확히 실패한다", () => {

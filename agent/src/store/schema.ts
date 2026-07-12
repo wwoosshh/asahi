@@ -5,7 +5,8 @@ export const SCHEMA_VERSION = 2;
 // - INTEGER PRIMARY KEY AUTOINCREMENT -> BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
 // - 불리언 의미 컬럼(is_private, processed, private_memory_loaded) -> BOOLEAN
 // - FTS5 가상테이블(messages_fts/events_fts)과 그 트리거는 제거했다. 검색은 이후 태스크에서 ILIKE 로 구현한다.
-// - 1단계 호환 테이블(events/summaries)은 migrate.ts 가 여전히 참조하므로 유지한다(최소 변경 원칙).
+// - 1단계 호환 테이블(events/summaries)은 "새로 시작" 정책(T3)에 따라 제거했다 — migrateFromPhase1
+//   삭제로 더 이상 아무도 참조하지 않는다(legacy Repo(better-sqlite3) 도 함께 제거).
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
@@ -15,25 +16,6 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS events (
-  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  ts BIGINT NOT NULL,
-  type TEXT NOT NULL,
-  channel TEXT,
-  channel_ref TEXT,
-  content TEXT NOT NULL,
-  processed BOOLEAN NOT NULL DEFAULT TRUE
-);
-CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-
-CREATE TABLE IF NOT EXISTS summaries (
-  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  created_ts BIGINT NOT NULL,
-  from_event_id BIGINT NOT NULL,
-  to_event_id BIGINT NOT NULL,
-  content TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS users (

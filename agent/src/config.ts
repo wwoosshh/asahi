@@ -16,6 +16,7 @@ export type Config = {
   discordToken: string;
   ownerId: string;
   channelId?: string;
+  databaseUrl: string;
   dataDir: string;
   memoryDir: string;
   sessionIdleMinutes: number;
@@ -27,7 +28,7 @@ export type Config = {
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const missing = ["DISCORD_TOKEN", "DISCORD_OWNER_ID"].filter((k) => !env[k]);
+  const missing = ["DISCORD_TOKEN", "DISCORD_OWNER_ID", "DATABASE_URL"].filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`환경변수 누락: ${missing.join(", ")} — .env 파일을 확인하세요 (.env.example 참고)`);
   }
@@ -37,6 +38,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     discordToken: env.DISCORD_TOKEN as string,
     ownerId: env.DISCORD_OWNER_ID as string,
     channelId: env.DISCORD_CHANNEL_ID || undefined,
+    databaseUrl: env.DATABASE_URL as string,
     dataDir: env.DATA_DIR || path.resolve("..", "data", "store"),
     memoryDir: env.MEMORY_DIR || path.resolve("..", "data", "memory"),
     sessionIdleMinutes: positiveNumberEnv(env, "SESSION_IDLE_MINUTES", 30),

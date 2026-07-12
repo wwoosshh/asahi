@@ -4,7 +4,6 @@ import dotenv from "dotenv";
 import { loadConfig } from "./config.js";
 import { EventBus } from "./events/bus.js";
 import { openDb } from "./store/db.js";
-import { migrateFromPhase1 } from "./store/migrate.js";
 import { UsersRepo } from "./store/usersRepo.js";
 import { ConversationsRepo } from "./store/conversationsRepo.js";
 import { ParticipantsRepo } from "./store/participantsRepo.js";
@@ -25,9 +24,7 @@ dotenv.config();
 async function main() {
   const config = loadConfig();
 
-  const db = openDb(path.join(config.dataDir, "agent.db"));
-  // 1단계 데이터(events/summaries/settings/마크다운 기억)를 v2 스키마로 멱등 이전(1회).
-  migrateFromPhase1(db, { ownerId: config.ownerId, memoryDir: config.memoryDir });
+  const db = await openDb(config.databaseUrl);
 
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
@@ -43,7 +40,7 @@ async function main() {
     allowedDirs,
   };
   // 소유자를 users(owner)로 보장 — 게이트 통과 기본값.
-  users.upsert(config.ownerId, { role: "owner" });
+  await users.upsert(config.ownerId, { role: "owner" });
 
   const bus = new EventBus();
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다 — 에이전트가 소스 트리를 훑지 않도록(1단계 점검 지적).
@@ -68,7 +65,7 @@ async function main() {
     clearInterval(idleTimer);
     await core.drain();     // 처리 중인 메시지를 마저 끝내고
     await discord.stop();   // 체인에 남은 전송을 흘려보낸 뒤 클라이언트 종료
-    db.close();
+    await db.end();         // pg Pool 연결 정리
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());

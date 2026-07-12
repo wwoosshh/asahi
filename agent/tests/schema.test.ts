@@ -18,12 +18,10 @@ describe("새 스키마(Postgres)", () => {
     }
   });
 
-  it("기존 1단계 테이블도 그대로 있다(덧붙임)", async () => {
+  it("settings 테이블이 있다", async () => {
     const db = await openTestDb();
     const names = await tableNames(db);
-    expect(names).toContain("events");
     expect(names).toContain("settings");
-    expect(names).toContain("summaries");
   });
 
   it("schema_version 이 기록된다", async () => {

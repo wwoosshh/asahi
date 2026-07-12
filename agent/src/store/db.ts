@@ -1,6 +1,12 @@
-import { Pool } from "pg";
+import pg, { Pool } from "pg";
 import type { PoolClient } from "pg";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema.js";
+
+// 안전망(T3): 실제 pg 드라이버는 int8(bigint)·COUNT(*) 결과를 문자열로 반환한다.
+// Repo 들이 이미 Number(...)로 감싸지만, 전역 타입 파서로 int8 컬럼을 항상 JS number 로
+// 파싱해 이중으로 방어한다. pg-mem(openTestDb) 은 와이어 프로토콜을 타지 않으므로 이 파서의
+// 영향을 받지 않는다(스파이크로 확인) — 즉 테스트 경로는 그대로다.
+pg.types.setTypeParser(20, (v: string | null) => (v === null ? null : Number(v)));
 
 // 팀 계약(T2/T3 의 Repo 들이 생성자 인자로 이 타입을 받는다): pg 의 Pool 그대로.
 // 운영에서는 실제 Postgres(Supabase) 에 붙는 Pool, 테스트에서는 pg-mem 이 만들어주는
