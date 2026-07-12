@@ -176,6 +176,25 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     expect(await listDirsHandler(ownerServer)).toContain("소유자");
   });
 
+  it("ownWorkstation(자기 PC 워커 실행)이면 손님(isOwner=false)이라도 DM 에서 세 도구 모두 허용한다", async () => {
+    const guestOnOwnPc = await ctx({ isOwner: false, isPrivate: true, ownWorkstation: true, userId: "guest" });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-ownworkstation-"));
+    const out = await allowDirHandler(guestOnOwnPc, { path: dir });
+    expect(out).toContain(path.resolve(dir));
+    expect(await guestOnOwnPc.repos.allowedDirs.list(guestOnOwnPc.userId)).toEqual([path.resolve(dir)]);
+    expect(await listDirsHandler(guestOnOwnPc)).toContain(path.resolve(dir));
+    const revoked = await revokeDirHandler(guestOnOwnPc, { path: dir });
+    expect(revoked).toContain(path.resolve(dir));
+    expect(await guestOnOwnPc.repos.allowedDirs.list(guestOnOwnPc.userId)).toEqual([]);
+  });
+
+  it("ownWorkstation 이라도 서버(비공개 아님)에서는 세 도구 모두 거부한다", async () => {
+    const guestOnOwnPcServer = await ctx({ isOwner: false, isPrivate: false, ownWorkstation: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-ownworkstation-server-"));
+    expect(await allowDirHandler(guestOnOwnPcServer, { path: dir })).toContain("소유자");
+    expect(await listDirsHandler(guestOnOwnPcServer)).toContain("소유자");
+  });
+
   it("허용 폴더는 ctx.userId 별로 격리된다 — 다른 사용자의 허용 목록에 서로 영향 없음", async () => {
     const db = await openTestDb();
     const repos = { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db) };
@@ -251,5 +270,43 @@ describe("allowedToolsFor — 능력 계층(§7.1)", () => {
     expect(allowedToolsFor("allowed", true, false, "cloud")).toEqual(["mcp__asahi__remember", "mcp__asahi__recall"]);
     expect(allowedToolsFor("owner", false, false, "cloud")).toEqual(["mcp__asahi__recall"]);
     expect(allowedToolsFor("allowed", false, false, "cloud")).toEqual(["mcp__asahi__recall"]);
+  });
+
+  describe("ownWorkstation(하이브리드 조각3 — 로컬 워커: 자기 PC 전권)", () => {
+    it("손님(isOwner=false)+ownWorkstation+DM 이면 파일/Bash/allow_dir/remember/recall 을 포함하되 manage_access 는 없다", () => {
+      const tools = allowedToolsFor("allowed", true, false, "local", true);
+      expect(tools).toContain("Read");
+      expect(tools).toContain("Write");
+      expect(tools).toContain("Edit");
+      expect(tools).toContain("Glob");
+      expect(tools).toContain("Grep");
+      expect(tools).toContain("Bash");
+      expect(tools).toContain("mcp__asahi__remember");
+      expect(tools).toContain("mcp__asahi__recall");
+      expect(tools).toContain("mcp__asahi__allow_dir");
+      expect(tools).toContain("mcp__asahi__revoke_dir");
+      expect(tools).toContain("mcp__asahi__list_dirs");
+      expect(tools).not.toContain("mcp__asahi__manage_access");
+    });
+
+    it("소유자(isOwner=true)+ownWorkstation+DM 이면 기존 소유자 DM 도구셋과 동일(manage_access 포함)", () => {
+      expect(allowedToolsFor("owner", true, true, "local", true)).toEqual(allowedToolsFor("owner", true, true, "local", false));
+      expect(allowedToolsFor("owner", true, true, "local", true)).toContain("mcp__asahi__manage_access");
+    });
+
+    it("ownWorkstation 이라도 서버(비공개 아님)에서는 영향 없음(recall 만)", () => {
+      expect(allowedToolsFor("allowed", false, false, "local", true)).toEqual(["mcp__asahi__recall"]);
+    });
+
+    it("ownWorkstation=false(기본값, 봇 경로)면 기존 손님 DM 동작과 동일", () => {
+      expect(allowedToolsFor("allowed", true, false, "local")).toEqual(allowedToolsFor("allowed", true, false, "local", false));
+    });
+
+    it("deployTarget='cloud' 이면 ownWorkstation 이 true 여도 PC 도구가 열리지 않는다(워커가 아니므로)", () => {
+      const tools = allowedToolsFor("allowed", true, false, "cloud", true);
+      expect(tools).toEqual(["mcp__asahi__remember", "mcp__asahi__recall"]);
+      expect(tools).not.toContain("Read");
+      expect(tools).not.toContain("Bash");
+    });
   });
 });

@@ -20,7 +20,17 @@ export type ToolCtx = {
   isOwner: boolean;
   userId: string;
   conversationId: number;
+  // 하이브리드 조각3: 로컬 워커가 이 턴을 그 사용자 자신의 PC 에서 실행 중이면 true.
+  // 손님이라도 자기 PC 이므로 PC 도구를 열어준다(아래 canManagePc/allowedToolsFor 참고).
+  // manage_access·recall 전원열람 등 신원 기반 특권에는 영향을 주지 않는다(isOwner 로만 판정).
+  ownWorkstation?: boolean;
 };
+
+// PC 관리 도구(allow_dir/revoke_dir/list_dirs)를 쓸 수 있는 신원인지: 소유자 DM, 또는
+// 워커가 실행 중인 자기 PC 의 DM(손님 포함). 서버/스레드(비공개)는 어느 쪽이든 항상 거부한다.
+function canManagePc(ctx: ToolCtx): boolean {
+  return ctx.isPrivate && (ctx.isOwner || ctx.ownWorkstation === true);
+}
 
 // ── 순수 핸들러(테스트 대상) ────────────────────────────────────────────────
 export async function rememberHandler(ctx: ToolCtx, args: { title: string; content: string }): Promise<string> {
@@ -57,7 +67,7 @@ export async function manageAccessHandler(ctx: ToolCtx, args: { userId: string; 
 const OWNER_DM_ONLY = "이 작업은 소유자 DM에서만 할 수 있어요.";
 
 export async function allowDirHandler(ctx: ToolCtx, args: { path: string }): Promise<string> {
-  if (!(ctx.isOwner && ctx.isPrivate)) return OWNER_DM_ONLY;
+  if (!canManagePc(ctx)) return OWNER_DM_ONLY;
   let stat: fs.Stats;
   try {
     stat = fs.statSync(args.path);
@@ -73,13 +83,13 @@ export async function allowDirHandler(ctx: ToolCtx, args: { path: string }): Pro
 }
 
 export async function revokeDirHandler(ctx: ToolCtx, args: { path: string }): Promise<string> {
-  if (!(ctx.isOwner && ctx.isPrivate)) return OWNER_DM_ONLY;
+  if (!canManagePc(ctx)) return OWNER_DM_ONLY;
   await ctx.repos.allowedDirs.remove(ctx.userId, args.path);
   return `허용 폴더에서 제거했어요: ${path.resolve(args.path)}`;
 }
 
 export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
-  if (!(ctx.isOwner && ctx.isPrivate)) return OWNER_DM_ONLY;
+  if (!canManagePc(ctx)) return OWNER_DM_ONLY;
   const dirs = await ctx.repos.allowedDirs.list(ctx.userId);
   if (dirs.length === 0) return "허용된 폴더가 없어요.";
   return dirs.map((d) => `- ${d}`).join("\n");
@@ -89,11 +99,16 @@ export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
 // owner-DM → 파일 도구 + Bash + 기억 + 접근관리 + 허용폴더 관리. 손님 DM → 기억(본인)만. 서버 → recall(공용)만.
 // deployTarget="cloud"(Railway 조각2): 소유자 PC 가 없는 컨테이너 실행이므로 owner-DM 이라도 PC 도구
 // (파일/Bash/allow_dir 류)는 빼고 대화·기억·접근관리(PC 무관)만 남긴다. local(기본)은 기존과 완전히 동일.
+// ownWorkstation(하이브리드 조각3, 로컬 워커 전용): 이 턴이 그 사용자 자신의 PC 에서 실행 중이면,
+// 손님(isOwner=false)이라도 자기 PC 는 전권이어야 하므로 파일/Bash/dir 관리 도구를 연다. 다만
+// manage_access·recall 전원열람 같은 신원 기반 특권은 그대로 소유자(isOwner)만 갖는다(프라이버시 불변식).
+// deployTarget="cloud" 는 워커가 아니므로(Railway 봇) ownWorkstation 이 와도 PC 도구를 열지 않는다.
 export function allowedToolsFor(
   role: Role,
   isPrivate: boolean,
   isOwner: boolean,
   deployTarget: "local" | "cloud" = "local",
+  ownWorkstation = false,
 ): string[] {
   if (isOwner && isPrivate) {
     if (deployTarget === "cloud") {
@@ -102,6 +117,13 @@ export function allowedToolsFor(
     return [
       ...FILE_TOOLS, "Bash",
       t("remember"), t("recall"), t("manage_access"),
+      t("allow_dir"), t("revoke_dir"), t("list_dirs"),
+    ];
+  }
+  if (ownWorkstation && isPrivate && deployTarget !== "cloud") {
+    return [
+      ...FILE_TOOLS, "Bash",
+      t("remember"), t("recall"),
       t("allow_dir"), t("revoke_dir"), t("list_dirs"),
     ];
   }

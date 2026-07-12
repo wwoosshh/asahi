@@ -10,6 +10,7 @@ import type { MessagesRepo } from "../store/messagesRepo.js";
 import type { SummariesRepo } from "../store/summariesRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { TurnsRepo } from "../store/turnsRepo.js";
+import { buildContextBlock, isSessionNotFound } from "./turnPrep.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -27,12 +28,6 @@ export function formatProgress(u: ProgressUpdate): string {
     case "answering":
       return "답변 작성 중";
   }
-}
-
-// SDK 가 resume 세션을 못 찾을 때의 에러(클라우드 컨테이너 재배포로 세션 저장소가 초기화된 경우 등).
-function isSessionNotFound(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return msg.includes("No conversation found with session ID");
 }
 
 export type CoreRepos = {
@@ -194,7 +189,7 @@ export class AgentCore {
       if (conv.sessionId && this.now() - conv.lastActiveTs < this.idleMs()) {
         resume = conv.sessionId;
       } else {
-        prompt = `${await this.buildContextBlock(conv, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
+        prompt = `${await buildContextBlock(this.repos, conv, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
         // 이 메시지가 새 세션 윈도우의 시작 → 요약 범위(from_message_id) 기준점으로 기록한다.
         await this.repos.conversations.setFirstMessageId(conv.id, messageId);
         if (conv.isPrivate && conv.primaryUserId === this.ownerId) {
@@ -218,7 +213,7 @@ export class AgentCore {
           console.warn("[core] resume 세션 없음 — 새 세션으로 재시도:", conv.id);
           await this.repos.conversations.setSession(conv.id, null, this.now());
           const fresh = (await this.repos.conversations.getById(convId)) ?? conv;
-          const retryPrompt = `${await this.buildContextBlock(fresh, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
+          const retryPrompt = `${await buildContextBlock(this.repos, fresh, messageId)}\n\n---\n\n사용자 메시지: ${text}`;
           await this.repos.conversations.setFirstMessageId(conv.id, messageId);
           if (conv.isPrivate && conv.primaryUserId === this.ownerId) {
             await this.repos.conversations.setPrivateMemoryLoaded(conv.id, true);
@@ -313,27 +308,6 @@ export class AgentCore {
       await this.repos.conversations.setSession(conv.id, null, this.now());
       await this.repos.conversations.setStatus(conv.id, "idle");
     }
-  }
-
-  private async buildContextBlock(conv: Conversation, excludeMessageId: number): Promise<string> {
-    // 프라이버시(§6): DM 은 상대(primaryUser)의 개인+공용, 서버/스레드는 공용만.
-    const memories = conv.isPrivate ? await this.repos.memories.forUser(conv.primaryUserId) : await this.repos.memories.sharedOnly();
-    const memoryLines = memories.length > 0 ? memories.map((m) => `- [${m.title}] ${m.content}`).join("\n") : "(기억 없음)";
-    const summaries = await this.repos.summaries.recent(conv.id, 3);
-    const recentAll = await this.repos.messages.recent(conv.id, 21);
-    const recent = recentAll.filter((m) => m.id !== excludeMessageId).slice(-20);
-    const recentLines = recent
-      .map((m) => `[${new Date(m.ts).toISOString()}] ${m.role === "user" ? "사용자" : m.role === "assistant" ? "비서" : "시스템"}: ${m.content}`)
-      .join("\n");
-    return [
-      "[기억 컨텍스트 — 새 세션 시작]",
-      "## 기억 (개인/공용)",
-      memoryLines,
-      "## 이전 대화 요약 (최신순)",
-      summaries.length > 0 ? summaries.join("\n---\n") : "(요약 없음)",
-      "## 최근 대화 기록",
-      recentLines.length > 0 ? recentLines : "(기록 없음)",
-    ].join("\n\n");
   }
 
   private async notify(conv: Conversation, text: string): Promise<void> {

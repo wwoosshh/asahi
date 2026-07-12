@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, loadWorkerConfig } from "../src/config.js";
 
 const base = { DISCORD_TOKEN: "tok", DISCORD_OWNER_ID: "123", DATABASE_URL: "postgres://localhost/test" };
 
@@ -71,5 +71,43 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR: "30/hour" })).toThrow(/MAX_TURNS_PER_HOUR/);
     expect(() => loadConfig({ ...base, MAX_TURNS_PER_HOUR: "0" })).toThrow(/MAX_TURNS_PER_HOUR/);
     expect(() => loadConfig({ ...base, SESSION_IDLE_MINUTES: "abc" })).toThrow(/SESSION_IDLE_MINUTES/);
+  });
+});
+
+describe("loadWorkerConfig(하이브리드 조각3 — 로컬 워커 전용 설정, 봇 설정과 분리)", () => {
+  const workerBase = { DATABASE_URL: "postgres://localhost/test", DISCORD_OWNER_ID: "123", WORKER_USER_ID: "456" };
+
+  it("필수값이 있으면 로드된다", () => {
+    const c = loadWorkerConfig(workerBase);
+    expect(c.databaseUrl).toBe("postgres://localhost/test");
+    expect(c.ownerId).toBe("123");
+    expect(c.workerUserId).toBe("456");
+    expect(c.workerSecret).toBeUndefined();
+    expect(c.sessionIdleMinutes).toBe(30);
+    expect(c.dataDir.endsWith("store")).toBe(true);
+    expect(c.memoryDir.endsWith("memory")).toBe(true);
+  });
+
+  it("WORKER_SECRET 이 있으면 로드만 한다(지금은 로드만, 검증 없음)", () => {
+    const c = loadWorkerConfig({ ...workerBase, WORKER_SECRET: "s3cr3t" });
+    expect(c.workerSecret).toBe("s3cr3t");
+  });
+
+  it("DISCORD_TOKEN 은 필요 없다(워커는 디스코드에 연결하지 않는다)", () => {
+    expect(() => loadWorkerConfig(workerBase)).not.toThrow();
+  });
+
+  it("DATABASE_URL/DISCORD_OWNER_ID/WORKER_USER_ID 중 하나라도 없으면 무엇이 빠졌는지 알려주며 실패한다", () => {
+    const { DATABASE_URL, ...withoutDb } = workerBase;
+    expect(() => loadWorkerConfig(withoutDb)).toThrow(/DATABASE_URL/);
+    const { DISCORD_OWNER_ID, ...withoutOwner } = workerBase;
+    expect(() => loadWorkerConfig(withoutOwner)).toThrow(/DISCORD_OWNER_ID/);
+    const { WORKER_USER_ID, ...withoutWorkerUser } = workerBase;
+    expect(() => loadWorkerConfig(withoutWorkerUser)).toThrow(/WORKER_USER_ID/);
+  });
+
+  it("SESSION_IDLE_MINUTES 를 env 로 덮어쓸 수 있다", () => {
+    const c = loadWorkerConfig({ ...workerBase, SESSION_IDLE_MINUTES: "10" });
+    expect(c.sessionIdleMinutes).toBe(10);
   });
 });

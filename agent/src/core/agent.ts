@@ -8,7 +8,9 @@ import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx } from "./tools.
 import { decidePathPermission, isPathGatedTool, extractCandidatePaths, resolveRealOrNearestAncestor } from "./pathPermission.js";
 
 // 현재 턴의 상대·대화 컨텍스트. 이걸로 role·is_private 별 도구셋(allowedTools)을 정한다(§7.1).
-export type TurnContext = { role: Role; isPrivate: boolean; isOwner: boolean; userId: string; conversationId: number };
+// ownWorkstation(하이브리드 조각3): 로컬 워커가 이 턴을 그 사용자 자신의 PC 에서 실행 중이면 true —
+// 손님이라도 자기 PC 전권으로 파일/Bash 를 연다(allowedToolsFor/canUseTool 참고). 봇(index.ts)은 항상 생략(undefined).
+export type TurnContext = { role: Role; isPrivate: boolean; isOwner: boolean; userId: string; conversationId: number; ownWorkstation?: boolean };
 // 턴 처리 중 진행 상황(판별 유니온). 표시용 텍스트로 바꾸는 건 core.ts 의 formatProgress 가 맡는다.
 export type ProgressUpdate =
   | { kind: "tool"; name: string; input?: string }
@@ -82,7 +84,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
       isOwner: req.context.isOwner, userId: req.context.userId, conversationId: req.context.conversationId,
     };
     const server = buildTools(ctx);
-    const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner, deployTarget);
+    const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner, deployTarget, req.context.ownWorkstation);
     // 파일/Bash 는 canUseTool(decidePathPermission) 을 반드시 거치도록 bare 사전승인 목록에서 뺀다 —
     // SDK 는 allowedTools 에 괄호 없는 "이름 그대로" 항목이 있으면 canUseTool 을 아예 호출하지 않고
     // 통과시켜 버린다(경로 검사가 완전히 우회됨). mcp__asahi__* 도구는 그대로 bare 사전승인 유지.
@@ -92,6 +94,11 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
     // 를 "default" 로 바꾼 뒤 WebSearch/Task 등 기존에 쓸 수 없던 내장 도구까지 새로 열리게 된다.)
     const builtinTools = allowedTools.filter(isPathGatedTool);
     const isOwnerDm = req.context.isOwner && req.context.isPrivate;
+    // 자기 PC 전권(하이브리드 조각3): 워커가 이 턴을 그 사용자 자신의 PC 에서 실행 중이면, 손님이라도
+    // decidePathPermission 의 "소유자 DM 전용" 게이트를 통과시킨다(경로는 여전히 allowedDirs 로 제한).
+    // cloud(Railway 봇)는 워커가 아니므로 ownWorkstation 이 와도 이 게이트를 열지 않는다(이중방어).
+    const isOwnWorkstationDm = req.context.ownWorkstation === true && req.context.isPrivate && deployTarget !== "cloud";
+    const pcPrivileged = isOwnerDm || isOwnWorkstationDm;
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       // cloud 이중방어: allowedToolsFor 가 이미 PC 도구를 뺐지만, 여기서도 경로 검사 이전에
@@ -104,7 +111,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
       const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
       // 보안리뷰 #2: dangerouslyDisableSandbox 로 남은 봉쇄까지 무력화하는 걸 canUseTool 이 항상 막는다.
       const dangerouslyDisableSandbox = toolName === "Bash" && input.dangerouslyDisableSandbox === true;
-      const decision = decidePathPermission(toolName, resolvedPaths, { isOwnerDm, allowedDirs, dangerouslyDisableSandbox });
+      const decision = decidePathPermission(toolName, resolvedPaths, { isOwnerDm: pcPrivileged, allowedDirs, dangerouslyDisableSandbox });
       return decision.behavior === "allow" ? { behavior: "allow" } : { behavior: "deny", message: decision.message };
     };
 
@@ -113,7 +120,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
     let ok = false;
     // 턴 하나 동안 tool_use_id → 짧은 도구명(진행 이벤트용). onProgress 가 없으면 추출도 하지 않는다.
     const pendingToolNames = new Map<string, string>();
-    const additionalDirectories = isOwnerDm && deployTarget === "local" ? await repos.allowedDirs.list(req.context.userId) : [];
+    const additionalDirectories = pcPrivileged && deployTarget === "local" ? await repos.allowedDirs.list(req.context.userId) : [];
 
     for await (const message of query({
       prompt: req.prompt,

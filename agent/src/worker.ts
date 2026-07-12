@@ -1,0 +1,97 @@
+import fs from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
+import { loadWorkerConfig } from "./config.js";
+import { openDb } from "./store/db.js";
+import { UsersRepo } from "./store/usersRepo.js";
+import { ConversationsRepo } from "./store/conversationsRepo.js";
+import { MessagesRepo } from "./store/messagesRepo.js";
+import { SummariesRepo } from "./store/summariesRepo.js";
+import { MemoriesRepo } from "./store/memoriesRepo.js";
+import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
+import { JobsRepo } from "./store/jobsRepo.js";
+import { makeRunAgentTurn } from "./core/agent.js";
+import { processJob } from "./worker/jobRunner.js";
+
+// 로컬 워커 진입점(하이브리드 조각3, W2): 디스코드 연결 없이 이 사용자(WORKER_USER_ID)가 담당하는
+// worker_jobs 를 폴링해 처리한다. 봇(Railway, src/index.ts)이 job 을 넣고(enqueue) 결과를 디스코드로
+// 보내는 라우팅은 W3 몫 — 이 파일은 job 을 집어 실행하고 progress/result 를 job 행에 기록하는 데까지다.
+//
+// PC(파일/Bash) 작업은 언제나 이 워커가 실제로 동작하는 이 PC 위에서만 실행된다 — allowedDirs 로
+// 등록된 폴더 밖은 canUseTool(경로 게이트)이 그대로 막는다(agent.ts 참고).
+
+dotenv.config({ path: path.resolve("..", ".env") });
+dotenv.config();
+
+const HEARTBEAT_MS = 10_000;
+const POLL_MS = 2_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function main() {
+  const config = loadWorkerConfig();
+  const db = await openDb(config.databaseUrl);
+
+  const users = new UsersRepo(db);
+  const conversations = new ConversationsRepo(db);
+  const messages = new MessagesRepo(db);
+  const summaries = new SummariesRepo(db);
+  const memories = new MemoriesRepo(db);
+  const allowedDirs = new AllowedDirsRepo(db);
+  const jobs = new JobsRepo(db);
+  const repos = { conversations, messages, summaries, memories, users, jobs };
+
+  // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다(index.ts 와 동일한 정책).
+  const agentCwd = path.resolve(config.dataDir, "..", "agent-cwd");
+  fs.mkdirSync(agentCwd, { recursive: true });
+
+  // 워커는 항상 로컬 실행(자기 PC) — deployTarget 은 항상 "local".
+  const runTurn = makeRunAgentTurn({ memories, users, allowedDirs }, "local");
+
+  let stopped = false;
+
+  // 하트비트: 봇이 isOnline(cutoff) 으로 "이 사용자의 워커가 떠 있는지" 판단하는 근거.
+  const heartbeatTimer = setInterval(() => {
+    void jobs.heartbeat(config.workerUserId, Date.now()).catch((err) => {
+      console.error("[worker] 하트비트 실패:", err);
+    });
+  }, HEARTBEAT_MS);
+  await jobs.heartbeat(config.workerUserId, Date.now()); // 기동 직후 바로 한 번(초기 오프라인 창 최소화)
+
+  // 폴링 루프: job 을 잡으면 바로 다음 job 을 확인하고(버스트 처리), 없으면 POLL_MS 만큼 쉰다.
+  const pollLoop = async (): Promise<void> => {
+    while (!stopped) {
+      try {
+        const job = await jobs.claimNext(config.workerUserId, Date.now());
+        if (job) {
+          await processJob({ repos, runTurn, agentCwd, ownerId: config.ownerId, idleMs: config.sessionIdleMinutes * 60 * 1000 }, job);
+          continue;
+        }
+      } catch (err) {
+        console.error("[worker] 폴링 오류:", err);
+      }
+      await sleep(POLL_MS);
+    }
+  };
+  const pollPromise = pollLoop();
+
+  const shutdown = async () => {
+    console.log("워커 종료 중...");
+    stopped = true;
+    clearInterval(heartbeatTimer);
+    await pollPromise;  // 진행 중인 job 처리를 마저 끝낸다
+    await db.end();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
+
+  console.log(`로컬 워커가 시작되었습니다 (WORKER_USER_ID=${config.workerUserId}).`);
+}
+
+main().catch((err) => {
+  console.error("워커 시작 실패:", err);
+  process.exit(1);
+});

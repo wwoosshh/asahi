@@ -52,3 +52,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     deployTarget: env.DEPLOY_TARGET === "cloud" ? "cloud" : "local",
   };
 }
+
+// 하이브리드 조각3(사용자별 로컬 워커) 전용 설정. 봇(loadConfig/Config)과 완전히 분리 —
+// 워커는 디스코드 토큰이 필요 없고(디스코드 연결 없음, DB 로만 job 을 주고받는다), 대신 자신이
+// 담당할 사용자(WORKER_USER_ID)와 소유자 신원 판정용 DISCORD_OWNER_ID 가 필요하다.
+export type WorkerConfig = {
+  databaseUrl: string;
+  ownerId: string;       // DISCORD_OWNER_ID — isOwner(신원) 판정용. 봇과 동일한 값이어야 한다.
+  workerUserId: string;  // WORKER_USER_ID — 이 워커가 담당하는 디스코드 사용자 ID(job 을 claim 할 대상).
+  workerSecret?: string; // WORKER_SECRET(옵션) — 지금은 로드만 한다(추후 워커 인증에 사용 예정).
+  dataDir: string;
+  memoryDir: string;
+  sessionIdleMinutes: number;
+};
+
+export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
+  const missing = ["DATABASE_URL", "DISCORD_OWNER_ID", "WORKER_USER_ID"].filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`환경변수 누락: ${missing.join(", ")} — .env 파일을 확인하세요 (.env.example 참고)`);
+  }
+  return {
+    databaseUrl: env.DATABASE_URL as string,
+    ownerId: env.DISCORD_OWNER_ID as string,
+    workerUserId: env.WORKER_USER_ID as string,
+    workerSecret: env.WORKER_SECRET || undefined,
+    dataDir: env.DATA_DIR || path.resolve("..", "data", "store"),
+    memoryDir: env.MEMORY_DIR || path.resolve("..", "data", "memory"),
+    sessionIdleMinutes: positiveNumberEnv(env, "SESSION_IDLE_MINUTES", 30),
+  };
+}
