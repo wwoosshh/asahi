@@ -14,5 +14,14 @@ module.exports = {
       restart_delay: 5000,
       env: { NODE_ENV: "production" },
     },
+    {
+      name: "asahi-worker",
+      script: "dist/worker.js",
+      cwd: path.resolve(__dirname, "..", "agent"),
+      autorestart: true,
+      max_restarts: 50,
+      restart_delay: 5000,
+      env: { NODE_ENV: "production" },
+    },
   ],
 };

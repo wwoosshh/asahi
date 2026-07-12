@@ -10,6 +10,8 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "worker": "tsx src/worker.ts",
+    "worker:start": "node dist/worker.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
