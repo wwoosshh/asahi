@@ -1,21 +1,22 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db.js";
 
 export class ParticipantsRepo {
-  constructor(private db: Database.Database) {}
+  constructor(private db: Db) {}
 
-  upsert(conversationId: number, userId: string, joinedTs: number): void {
-    this.db.prepare(
-      "INSERT INTO conversation_participants (conversation_id, user_id, joined_ts) VALUES (?, ?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING",
-    ).run(conversationId, userId, joinedTs);
+  async upsert(conversationId: number, userId: string, joinedTs: number): Promise<void> {
+    await this.db.query(
+      "INSERT INTO conversation_participants (conversation_id, user_id, joined_ts) VALUES ($1, $2, $3) ON CONFLICT (conversation_id, user_id) DO NOTHING",
+      [conversationId, userId, joinedTs],
+    );
   }
 
-  count(conversationId: number): number {
-    const row = this.db.prepare("SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = ?").get(conversationId) as { n: number };
-    return row.n;
+  async count(conversationId: number): Promise<number> {
+    const r = await this.db.query("SELECT COUNT(*) AS n FROM conversation_participants WHERE conversation_id = $1", [conversationId]);
+    return Number((r.rows[0] as { n: number | string }).n);
   }
 
-  list(conversationId: number): string[] {
-    const rows = this.db.prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ? ORDER BY joined_ts").all(conversationId) as Array<{ user_id: string }>;
-    return rows.map((r) => r.user_id);
+  async list(conversationId: number): Promise<string[]> {
+    const r = await this.db.query("SELECT user_id FROM conversation_participants WHERE conversation_id = $1 ORDER BY joined_ts", [conversationId]);
+    return (r.rows as Array<{ user_id: string }>).map((row) => row.user_id);
   }
 }

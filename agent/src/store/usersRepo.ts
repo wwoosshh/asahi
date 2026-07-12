@@ -1,32 +1,35 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db.js";
 
 export type Role = "owner" | "allowed" | "blocked";
 
 export class UsersRepo {
   private now: () => number;
-  constructor(private db: Database.Database, now: () => number = Date.now) { this.now = now; }
+  constructor(private db: Db, now: () => number = Date.now) { this.now = now; }
 
-  upsert(id: string, patch: { role?: Role; displayName?: string }): void {
+  async upsert(id: string, patch: { role?: Role; displayName?: string }): Promise<void> {
     const t = this.now();
-    this.db.prepare(
+    await this.db.query(
       `INSERT INTO users (id, role, display_name, created_ts, updated_ts)
-       VALUES (@id, COALESCE(@role,'blocked'), @displayName, @t, @t)
-       ON CONFLICT(id) DO UPDATE SET
-         role = COALESCE(@role, users.role),
-         display_name = COALESCE(@displayName, users.display_name),
-         updated_ts = @t`,
-    ).run({ id, role: patch.role ?? null, displayName: patch.displayName ?? null, t });
+       VALUES ($1, COALESCE($2,'blocked'), $3, $4, $4)
+       ON CONFLICT (id) DO UPDATE SET
+         role = COALESCE($2, users.role),
+         display_name = COALESCE($3, users.display_name),
+         updated_ts = $4`,
+      [id, patch.role ?? null, patch.displayName ?? null, t],
+    );
   }
 
-  getRole(id: string): Role {
-    const row = this.db.prepare("SELECT role FROM users WHERE id = ?").get(id) as { role: Role } | undefined;
+  async getRole(id: string): Promise<Role> {
+    const r = await this.db.query("SELECT role FROM users WHERE id = $1", [id]);
+    const row = r.rows[0] as { role: Role } | undefined;
     return row?.role ?? "blocked";
   }
 
-  list(role?: Role): Array<{ id: string; role: Role; displayName: string | null }> {
-    const rows = (role
-      ? this.db.prepare("SELECT id, role, display_name FROM users WHERE role = ? ORDER BY id").all(role)
-      : this.db.prepare("SELECT id, role, display_name FROM users ORDER BY id").all()) as Array<{ id: string; role: Role; display_name: string | null }>;
-    return rows.map((r) => ({ id: r.id, role: r.role, displayName: r.display_name }));
+  async list(role?: Role): Promise<Array<{ id: string; role: Role; displayName: string | null }>> {
+    const r = role
+      ? await this.db.query("SELECT id, role, display_name FROM users WHERE role = $1 ORDER BY id", [role])
+      : await this.db.query("SELECT id, role, display_name FROM users ORDER BY id");
+    const rows = r.rows as Array<{ id: string; role: Role; display_name: string | null }>;
+    return rows.map((row) => ({ id: row.id, role: row.role, displayName: row.display_name }));
   }
 }

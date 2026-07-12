@@ -1,48 +1,47 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db.js";
 
 export type StoredMessage = { id: number; conversationId: number; ts: number; role: "user" | "assistant" | "system"; userId: string | null; content: string };
-type Row = { id: number; conversation_id: number; ts: number; role: "user" | "assistant" | "system"; user_id: string | null; content: string };
+type Row = { id: number | string; conversation_id: number | string; ts: number; role: "user" | "assistant" | "system"; user_id: string | null; content: string };
 function toMessage(r: Row): StoredMessage {
-  return { id: r.id, conversationId: r.conversation_id, ts: r.ts, role: r.role, userId: r.user_id, content: r.content };
-}
-
-// 자유 텍스트를 FTS5 안전 접두 쿼리로 (1단계 수정과 동일 방식)
-function toMatch(query: string): string {
-  return query.split(/\s+/).filter((t) => t.length > 0).map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+  return { id: Number(r.id), conversationId: Number(r.conversation_id), ts: r.ts, role: r.role, userId: r.user_id, content: r.content };
 }
 
 export class MessagesRepo {
-  constructor(private db: Database.Database) {}
+  constructor(private db: Db) {}
 
-  insert(m: { conversationId: number; ts: number; role: "user" | "assistant" | "system"; userId?: string; discordMessageId?: string; content: string; processed?: boolean }): number {
-    const result = this.db.prepare(
-      "INSERT INTO messages (conversation_id, ts, role, user_id, discord_message_id, content, processed) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).run(m.conversationId, m.ts, m.role, m.userId ?? null, m.discordMessageId ?? null, m.content, m.processed === false ? 0 : 1);
-    return Number(result.lastInsertRowid);
+  async insert(m: { conversationId: number; ts: number; role: "user" | "assistant" | "system"; userId?: string; discordMessageId?: string; content: string; processed?: boolean }): Promise<number> {
+    const r = await this.db.query(
+      "INSERT INTO messages (conversation_id, ts, role, user_id, discord_message_id, content, processed) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
+      [m.conversationId, m.ts, m.role, m.userId ?? null, m.discordMessageId ?? null, m.content, m.processed !== false],
+    );
+    return Number((r.rows[0] as { id: number | string }).id);
   }
 
-  recent(conversationId: number, limit: number): StoredMessage[] {
-    const rows = this.db.prepare(
-      "SELECT * FROM (SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC",
-    ).all(conversationId, limit) as Row[];
-    return rows.map(toMessage);
+  async recent(conversationId: number, limit: number): Promise<StoredMessage[]> {
+    const r = await this.db.query(
+      "SELECT * FROM (SELECT * FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT $2) AS recent_sub ORDER BY id ASC",
+      [conversationId, limit],
+    );
+    return (r.rows as Row[]).map(toMessage);
   }
 
-  search(conversationId: number | null, query: string, limit: number): StoredMessage[] {
-    const match = toMatch(query);
-    if (match.length === 0) return [];
-    const rows = (conversationId === null
-      ? this.db.prepare(`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ? ORDER BY m.id DESC LIMIT ?`).all(match, limit)
-      : this.db.prepare(`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid WHERE messages_fts MATCH ? AND m.conversation_id = ? ORDER BY m.id DESC LIMIT ?`).all(match, conversationId, limit)) as Row[];
-    return rows.map(toMessage);
+  // FTS5 대체: ILIKE 부분 문자열 검색(접두/형태소 매칭 없음, 단순 substring).
+  async search(conversationId: number | null, query: string, limit: number): Promise<StoredMessage[]> {
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return [];
+    const like = `%${trimmed}%`;
+    const r = conversationId === null
+      ? await this.db.query("SELECT * FROM messages WHERE content ILIKE $1 ORDER BY id DESC LIMIT $2", [like, limit])
+      : await this.db.query("SELECT * FROM messages WHERE content ILIKE $1 AND conversation_id = $2 ORDER BY id DESC LIMIT $3", [like, conversationId, limit]);
+    return (r.rows as Row[]).map(toMessage);
   }
 
-  unprocessedUserMessages(): StoredMessage[] {
-    const rows = this.db.prepare("SELECT * FROM messages WHERE role = 'user' AND processed = 0 ORDER BY id ASC").all() as Row[];
-    return rows.map(toMessage);
+  async unprocessedUserMessages(): Promise<StoredMessage[]> {
+    const r = await this.db.query("SELECT * FROM messages WHERE role = 'user' AND processed = FALSE ORDER BY id ASC");
+    return (r.rows as Row[]).map(toMessage);
   }
 
-  markProcessed(id: number): void {
-    this.db.prepare("UPDATE messages SET processed = 1 WHERE id = ?").run(id);
+  async markProcessed(id: number): Promise<void> {
+    await this.db.query("UPDATE messages SET processed = TRUE WHERE id = $1", [id]);
   }
 }

@@ -7,8 +7,8 @@ const KEY = "owner.allowedDirs";
 export class AllowedDirsRepo {
   constructor(private settings: SettingsRepo) {}
 
-  list(): string[] {
-    const raw = this.settings.get(KEY);
+  async list(): Promise<string[]> {
+    const raw = await this.settings.get(KEY);
     if (raw === null) return [];
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -19,20 +19,20 @@ export class AllowedDirsRepo {
     }
   }
 
-  add(dir: string): void {
+  async add(dir: string): Promise<void> {
     const norm = normalizeDir(dir);
-    const current = this.list();
+    const current = await this.list();
     if (current.includes(norm)) return;
-    this.save([...current, norm]);
+    await this.save([...current, norm]);
   }
 
-  remove(dir: string): void {
+  async remove(dir: string): Promise<void> {
     const norm = normalizeDir(dir);
-    const current = this.list();
-    this.save(current.filter((d) => d !== norm));
+    const current = await this.list();
+    await this.save(current.filter((d) => d !== norm));
   }
 
-  private save(dirs: string[]): void {
-    this.settings.set(KEY, JSON.stringify(dirs));
+  private async save(dirs: string[]): Promise<void> {
+    await this.settings.set(KEY, JSON.stringify(dirs));
   }
 }

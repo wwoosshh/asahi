@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db.js";
 
 export type Conversation = {
   id: number; kind: "dm" | "thread"; discordChannelId: string; originMessageId: string | null;
@@ -8,72 +8,77 @@ export type Conversation = {
 };
 
 type Row = {
-  id: number; kind: "dm" | "thread"; discord_channel_id: string; origin_message_id: string | null;
-  guild_id: string | null; parent_channel_id: string | null; primary_user_id: string; is_private: number;
-  session_id: string | null; first_message_id: number | null; private_memory_loaded: number;
+  id: number | string; kind: "dm" | "thread"; discord_channel_id: string; origin_message_id: string | null;
+  guild_id: string | null; parent_channel_id: string | null; primary_user_id: string; is_private: boolean;
+  session_id: string | null; first_message_id: number | string | null; private_memory_loaded: boolean;
   last_active_ts: number; status: "active" | "idle" | "closed";
 };
 
 function toConversation(r: Row): Conversation {
   return {
-    id: r.id, kind: r.kind, discordChannelId: r.discord_channel_id, originMessageId: r.origin_message_id,
+    id: Number(r.id), kind: r.kind, discordChannelId: r.discord_channel_id, originMessageId: r.origin_message_id,
     guildId: r.guild_id, parentChannelId: r.parent_channel_id, primaryUserId: r.primary_user_id,
-    isPrivate: r.is_private === 1, sessionId: r.session_id, firstMessageId: r.first_message_id,
-    privateMemoryLoaded: r.private_memory_loaded === 1, lastActiveTs: r.last_active_ts, status: r.status,
+    isPrivate: r.is_private, sessionId: r.session_id,
+    firstMessageId: r.first_message_id === null ? null : Number(r.first_message_id),
+    privateMemoryLoaded: r.private_memory_loaded, lastActiveTs: r.last_active_ts, status: r.status,
   };
 }
 
 export class ConversationsRepo {
-  constructor(private db: Database.Database) {}
+  constructor(private db: Db) {}
 
-  create(c: { kind: "dm" | "thread"; discordChannelId: string; originMessageId?: string; guildId?: string; parentChannelId?: string; primaryUserId: string; isPrivate: boolean; lastActiveTs: number }): number {
-    const result = this.db.prepare(
+  async create(c: { kind: "dm" | "thread"; discordChannelId: string; originMessageId?: string; guildId?: string; parentChannelId?: string; primaryUserId: string; isPrivate: boolean; lastActiveTs: number }): Promise<number> {
+    const r = await this.db.query(
       `INSERT INTO conversations (kind, discord_channel_id, origin_message_id, guild_id, parent_channel_id, primary_user_id, is_private, last_active_ts, status, created_ts)
-       VALUES (@kind, @discordChannelId, @originMessageId, @guildId, @parentChannelId, @primaryUserId, @isPrivate, @lastActiveTs, 'active', @lastActiveTs)`,
-    ).run({
-      kind: c.kind, discordChannelId: c.discordChannelId, originMessageId: c.originMessageId ?? null,
-      guildId: c.guildId ?? null, parentChannelId: c.parentChannelId ?? null, primaryUserId: c.primaryUserId,
-      isPrivate: c.isPrivate ? 1 : 0, lastActiveTs: c.lastActiveTs,
-    });
-    return Number(result.lastInsertRowid);
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $8) RETURNING id`,
+      [
+        c.kind, c.discordChannelId, c.originMessageId ?? null, c.guildId ?? null, c.parentChannelId ?? null,
+        c.primaryUserId, c.isPrivate, c.lastActiveTs,
+      ],
+    );
+    return Number((r.rows[0] as { id: number | string }).id);
   }
 
-  getById(id: number): Conversation | null {
-    const row = this.db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as Row | undefined;
+  async getById(id: number): Promise<Conversation | null> {
+    const r = await this.db.query("SELECT * FROM conversations WHERE id = $1", [id]);
+    const row = r.rows[0] as Row | undefined;
     return row ? toConversation(row) : null;
   }
 
-  getByChannelId(discordChannelId: string): Conversation | null {
-    const row = this.db.prepare("SELECT * FROM conversations WHERE discord_channel_id = ?").get(discordChannelId) as Row | undefined;
+  async getByChannelId(discordChannelId: string): Promise<Conversation | null> {
+    const r = await this.db.query("SELECT * FROM conversations WHERE discord_channel_id = $1", [discordChannelId]);
+    const row = r.rows[0] as Row | undefined;
     return row ? toConversation(row) : null;
   }
 
   // 유휴 정리 대상: 활성 상태 + 열린 세션 + last_active 가 컷오프 이전. 오래된 것부터.
-  listActiveIdle(cutoffTs: number, limit = 100): Conversation[] {
-    const rows = this.db.prepare(
-      "SELECT * FROM conversations WHERE status = 'active' AND session_id IS NOT NULL AND last_active_ts < ? ORDER BY last_active_ts ASC LIMIT ?",
-    ).all(cutoffTs, limit) as Row[];
-    return rows.map(toConversation);
+  async listActiveIdle(cutoffTs: number, limit = 100): Promise<Conversation[]> {
+    const r = await this.db.query(
+      "SELECT * FROM conversations WHERE status = 'active' AND session_id IS NOT NULL AND last_active_ts < $1 ORDER BY last_active_ts ASC LIMIT $2",
+      [cutoffTs, limit],
+    );
+    return (r.rows as Row[]).map(toConversation);
   }
 
-  getByOriginMessageId(originMessageId: string): Conversation | null {
-    const row = this.db.prepare("SELECT * FROM conversations WHERE origin_message_id = ?").get(originMessageId) as Row | undefined;
+  async getByOriginMessageId(originMessageId: string): Promise<Conversation | null> {
+    const r = await this.db.query("SELECT * FROM conversations WHERE origin_message_id = $1", [originMessageId]);
+    const row = r.rows[0] as Row | undefined;
     return row ? toConversation(row) : null;
   }
 
-  setSession(id: number, sessionId: string | null, lastActiveTs: number): void {
-    this.db.prepare("UPDATE conversations SET session_id = ?, last_active_ts = ? WHERE id = ?").run(sessionId, lastActiveTs, id);
+  async setSession(id: number, sessionId: string | null, lastActiveTs: number): Promise<void> {
+    await this.db.query("UPDATE conversations SET session_id = $1, last_active_ts = $2 WHERE id = $3", [sessionId, lastActiveTs, id]);
   }
 
-  setPrivateMemoryLoaded(id: number, loaded: boolean): void {
-    this.db.prepare("UPDATE conversations SET private_memory_loaded = ? WHERE id = ?").run(loaded ? 1 : 0, id);
+  async setPrivateMemoryLoaded(id: number, loaded: boolean): Promise<void> {
+    await this.db.query("UPDATE conversations SET private_memory_loaded = $1 WHERE id = $2", [loaded, id]);
   }
 
-  setStatus(id: number, status: "active" | "idle" | "closed"): void {
-    this.db.prepare("UPDATE conversations SET status = ? WHERE id = ?").run(status, id);
+  async setStatus(id: number, status: "active" | "idle" | "closed"): Promise<void> {
+    await this.db.query("UPDATE conversations SET status = $1 WHERE id = $2", [status, id]);
   }
 
-  setFirstMessageId(id: number, messageId: number): void {
-    this.db.prepare("UPDATE conversations SET first_message_id = ? WHERE id = ?").run(messageId, id);
+  async setFirstMessageId(id: number, messageId: number): Promise<void> {
+    await this.db.query("UPDATE conversations SET first_message_id = $1 WHERE id = $2", [messageId, id]);
   }
 }
