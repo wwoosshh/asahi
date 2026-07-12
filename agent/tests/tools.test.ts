@@ -5,7 +5,6 @@ import path from "node:path";
 import { openTestDb } from "../src/store/db.js";
 import { MemoriesRepo } from "../src/store/memoriesRepo.js";
 import { UsersRepo } from "../src/store/usersRepo.js";
-import { SettingsRepo } from "../src/store/settingsRepo.js";
 import { AllowedDirsRepo } from "../src/store/allowedDirsRepo.js";
 import {
   rememberHandler, recallHandler, manageAccessHandler,
@@ -16,7 +15,7 @@ import {
 async function ctx(over: Partial<ToolCtx> = {}): Promise<ToolCtx> {
   const db = await openTestDb();
   return {
-    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(new SettingsRepo(db)) },
+    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db) },
     role: "allowed", isPrivate: true, isOwner: false, userId: "guest", conversationId: 1,
     ...over,
   };
@@ -96,13 +95,13 @@ describe("manage_access 도구", () => {
   });
 });
 
-describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 DM 전용", () => {
+describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 DM 전용, ctx.userId 별로 저장", () => {
   it("소유자 DM 에서 실제 존재하는 디렉토리를 허용하면 list 에 반영된다", async () => {
     const owner = await ctx({ isOwner: true, isPrivate: true });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-allowdir-"));
     const out = await allowDirHandler(owner, { path: dir });
     expect(out).toContain(path.resolve(dir));
-    expect(await owner.repos.allowedDirs.list()).toEqual([path.resolve(dir)]);
+    expect(await owner.repos.allowedDirs.list(owner.userId)).toEqual([path.resolve(dir)]);
     expect(await listDirsHandler(owner)).toContain(path.resolve(dir));
   });
 
@@ -110,7 +109,7 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     const owner = await ctx({ isOwner: true, isPrivate: true });
     const bogus = path.join(os.tmpdir(), "asahi-does-not-exist-xyz");
     const out = await allowDirHandler(owner, { path: bogus });
-    expect(await owner.repos.allowedDirs.list()).toEqual([]);
+    expect(await owner.repos.allowedDirs.list(owner.userId)).toEqual([]);
     expect(out).toContain("찾을 수 없어요");
   });
 
@@ -120,7 +119,7 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     const file = path.join(dir, "a.txt");
     fs.writeFileSync(file, "x");
     await allowDirHandler(owner, { path: file });
-    expect(await owner.repos.allowedDirs.list()).toEqual([]);
+    expect(await owner.repos.allowedDirs.list(owner.userId)).toEqual([]);
   });
 
   it("심링크(정션)로 등록해도 실경로로 정규화해 저장한다(과차단 방지, 보안리뷰 #4)", async () => {
@@ -136,8 +135,8 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     try {
       const real = fs.realpathSync(link);
       const out = await allowDirHandler(owner, { path: link });
-      expect(await owner.repos.allowedDirs.list()).toEqual([real]);
-      expect(await owner.repos.allowedDirs.list()).not.toContain(path.resolve(link));
+      expect(await owner.repos.allowedDirs.list(owner.userId)).toEqual([real]);
+      expect(await owner.repos.allowedDirs.list(owner.userId)).not.toContain(path.resolve(link));
       expect(out).toContain(real);
     } finally {
       fs.rmSync(link, { recursive: true, force: true });
@@ -147,9 +146,9 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
   it("revoke_dir 은 허용 목록에서 제거한다", async () => {
     const owner = await ctx({ isOwner: true, isPrivate: true });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-revokedir-"));
-    await owner.repos.allowedDirs.add(dir);
+    await owner.repos.allowedDirs.add(owner.userId, dir);
     const out = await revokeDirHandler(owner, { path: dir });
-    expect(await owner.repos.allowedDirs.list()).toEqual([]);
+    expect(await owner.repos.allowedDirs.list(owner.userId)).toEqual([]);
     expect(out).toContain(path.resolve(dir));
   });
 
@@ -162,10 +161,10 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     const guest = await ctx({ isOwner: false, isPrivate: true });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-guest-"));
     expect(await allowDirHandler(guest, { path: dir })).toContain("소유자");
-    expect(await guest.repos.allowedDirs.list()).toEqual([]);
-    await guest.repos.allowedDirs.add(dir); // 이후 상태로 revoke 시도 검증
+    expect(await guest.repos.allowedDirs.list(guest.userId)).toEqual([]);
+    await guest.repos.allowedDirs.add(guest.userId, dir); // 이후 상태로 revoke 시도 검증
     expect(await revokeDirHandler(guest, { path: dir })).toContain("소유자");
-    expect(await guest.repos.allowedDirs.list()).toEqual([path.resolve(dir)]);
+    expect(await guest.repos.allowedDirs.list(guest.userId)).toEqual([path.resolve(dir)]);
     expect(await listDirsHandler(guest)).toContain("소유자");
   });
 
@@ -173,8 +172,29 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     const ownerServer = await ctx({ isOwner: true, isPrivate: false });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-ownerserver-"));
     expect(await allowDirHandler(ownerServer, { path: dir })).toContain("소유자");
-    expect(await ownerServer.repos.allowedDirs.list()).toEqual([]);
+    expect(await ownerServer.repos.allowedDirs.list(ownerServer.userId)).toEqual([]);
     expect(await listDirsHandler(ownerServer)).toContain("소유자");
+  });
+
+  it("허용 폴더는 ctx.userId 별로 격리된다 — 다른 사용자의 허용 목록에 서로 영향 없음", async () => {
+    const db = await openTestDb();
+    const repos = { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db) };
+    const ownerA: ToolCtx = { repos, role: "owner", isPrivate: true, isOwner: true, userId: "ownerA", conversationId: 1 };
+    const ownerB: ToolCtx = { repos, role: "owner", isPrivate: true, isOwner: true, userId: "ownerB", conversationId: 1 };
+    const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-userA-"));
+    const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-userB-"));
+
+    await allowDirHandler(ownerA, { path: dirA });
+    await allowDirHandler(ownerB, { path: dirB });
+
+    expect(await listDirsHandler(ownerA)).toContain(path.resolve(dirA));
+    expect(await listDirsHandler(ownerA)).not.toContain(path.resolve(dirB));
+    expect(await listDirsHandler(ownerB)).toContain(path.resolve(dirB));
+    expect(await listDirsHandler(ownerB)).not.toContain(path.resolve(dirA));
+
+    await revokeDirHandler(ownerA, { path: dirA });
+    expect(await listDirsHandler(ownerA)).toContain("없어요");
+    expect(await listDirsHandler(ownerB)).toContain(path.resolve(dirB)); // 영향 없음
   });
 });
 

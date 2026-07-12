@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // Postgres DDL. better-sqlite3 -> pg 이전(feat/postgres-supabase-store)에서
 // 기존 SQLite 스키마(db.ts 의 legacy SCHEMA + 이 파일의 NEW_SCHEMA)를 하나로 합쳤다.
@@ -141,4 +141,39 @@ CREATE TABLE IF NOT EXISTS triggers (
   created_ts BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_triggers_next ON triggers(next_run_ts) WHERE status = 'active';
+
+-- 하이브리드 재설계 조각3(사용자별 로컬 워커): Railway 봇이 owner/손님 DM 의 PC 작업(파일/Bash)을
+-- 각자의 로컬 워커에게 위임하는 큐. 워커 진입점·봇 라우팅은 별도 태스크(W2/W3) 몫이며, 이 스키마는
+-- 그 데이터 계층만 마련한다.
+CREATE TABLE IF NOT EXISTS worker_jobs (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  conversation_id BIGINT NOT NULL,
+  discord_channel_id TEXT NOT NULL,
+  user_message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  progress TEXT,
+  result TEXT,
+  error TEXT,
+  created_ts BIGINT NOT NULL,
+  claimed_ts BIGINT,
+  done_ts BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_worker_jobs_user_status ON worker_jobs(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_worker_jobs_status ON worker_jobs(status);
+
+-- 사용자별 워커 생존 신호. 워커가 주기적으로 heartbeat 를 찍고, 봇은 isOnline(cutoff) 으로
+-- "지금 이 사용자의 워커가 떠 있는지" 를 판단한다(라우팅 판단은 W2/W3 몫).
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+  user_id TEXT PRIMARY KEY,
+  last_ts BIGINT NOT NULL
+);
+
+-- 사용자별 허용 폴더(원격 개발 작업 대상). 기존 owner.allowedDirs 단일 settings 키를 대체한다 —
+-- 소유자는 지금까지처럼 자신의 userId(config.ownerId) 로 저장/조회되어 동작이 그대로다.
+CREATE TABLE IF NOT EXISTS allowed_dirs (
+  user_id TEXT NOT NULL,
+  dir TEXT NOT NULL,
+  PRIMARY KEY (user_id, dir)
+);
 `;

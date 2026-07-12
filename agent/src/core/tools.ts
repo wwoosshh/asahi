@@ -68,19 +68,19 @@ export async function allowDirHandler(ctx: ToolCtx, args: { path: string }): Pro
   // 보안리뷰 #4: 심볼릭 링크/정션으로 등록하면 canUseTool 의 realpath 후보와 어긋나 통째로 과차단되므로,
   // statSync 로 존재를 확인한 뒤 실경로로 저장한다(normalizeDir 자체는 순수 함수로 그대로 둔다).
   const real = fs.realpathSync(args.path);
-  await ctx.repos.allowedDirs.add(real);
+  await ctx.repos.allowedDirs.add(ctx.userId, real);
   return `허용 폴더에 추가했어요: ${path.resolve(real)}`;
 }
 
 export async function revokeDirHandler(ctx: ToolCtx, args: { path: string }): Promise<string> {
   if (!(ctx.isOwner && ctx.isPrivate)) return OWNER_DM_ONLY;
-  await ctx.repos.allowedDirs.remove(args.path);
+  await ctx.repos.allowedDirs.remove(ctx.userId, args.path);
   return `허용 폴더에서 제거했어요: ${path.resolve(args.path)}`;
 }
 
 export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
   if (!(ctx.isOwner && ctx.isPrivate)) return OWNER_DM_ONLY;
-  const dirs = await ctx.repos.allowedDirs.list();
+  const dirs = await ctx.repos.allowedDirs.list(ctx.userId);
   if (dirs.length === 0) return "허용된 폴더가 없어요.";
   return dirs.map((d) => `- ${d}`).join("\n");
 }

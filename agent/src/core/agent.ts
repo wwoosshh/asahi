@@ -99,7 +99,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
       if (deployTarget === "cloud" && isPathGatedTool(toolName)) {
         return { behavior: "deny", message: "클라우드 실행 중이라 PC 작업은 로컬 워커 연결 후 가능해요." };
       }
-      const allowedDirs = await repos.allowedDirs.list();
+      const allowedDirs = await repos.allowedDirs.list(req.context.userId);
       const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath, req.cwd);
       const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
       // 보안리뷰 #2: dangerouslyDisableSandbox 로 남은 봉쇄까지 무력화하는 걸 canUseTool 이 항상 막는다.
@@ -113,7 +113,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
     let ok = false;
     // 턴 하나 동안 tool_use_id → 짧은 도구명(진행 이벤트용). onProgress 가 없으면 추출도 하지 않는다.
     const pendingToolNames = new Map<string, string>();
-    const additionalDirectories = isOwnerDm && deployTarget === "local" ? await repos.allowedDirs.list() : [];
+    const additionalDirectories = isOwnerDm && deployTarget === "local" ? await repos.allowedDirs.list(req.context.userId) : [];
 
     for await (const message of query({
       prompt: req.prompt,

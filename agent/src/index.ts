@@ -11,7 +11,6 @@ import { MessagesRepo } from "./store/messagesRepo.js";
 import { SummariesRepo } from "./store/summariesRepo.js";
 import { MemoriesRepo } from "./store/memoriesRepo.js";
 import { TurnsRepo } from "./store/turnsRepo.js";
-import { SettingsRepo } from "./store/settingsRepo.js";
 import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
 import { AgentCore } from "./core/core.js";
 import { makeRunAgentTurn } from "./core/agent.js";
@@ -28,7 +27,7 @@ async function main() {
 
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
-  const allowedDirs = new AllowedDirsRepo(new SettingsRepo(db));
+  const allowedDirs = new AllowedDirsRepo(db);
   const repos = {
     users,
     conversations,
