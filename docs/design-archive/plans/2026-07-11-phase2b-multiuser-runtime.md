@@ -1,3 +1,9 @@
+---
+title: "2B 멀티유저·멀티채널 런타임 배선 Implementation Plan"
+status: Shipped
+shippedIn: 2B
+---
+
 # 2B 멀티유저·멀티채널 런타임 배선 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development 또는 executing-plans. Steps use checkbox (`- [ ]`).

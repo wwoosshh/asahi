@@ -1,3 +1,9 @@
+---
+title: "2B API 스파이크 결과 (확정)"
+status: Shipped
+shippedIn: 2B
+---
+
 # 2B API 스파이크 결과 (확정)
 
 설치 버전 기준으로 2B 계획의 코드가 사용할 실제 API를 확정한다.

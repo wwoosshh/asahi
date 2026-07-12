@@ -1,3 +1,9 @@
+---
+title: "Asahi 캐릭터/페르소나 시스템 Implementation Plan"
+status: Shipped
+shippedIn: 15907fb
+---
+
 # Asahi 캐릭터/페르소나 시스템 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

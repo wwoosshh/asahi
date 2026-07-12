@@ -1,3 +1,9 @@
+---
+title: "자기인지 — 자기 구조·데이터 조회(DB introspection) 설계"
+status: Shipped
+shippedIn: 039f91a
+---
+
 # 자기인지 — 자기 구조·데이터 조회(DB introspection) 설계
 
 - 날짜: 2026-07-12

@@ -1,3 +1,12 @@
+---
+title: "1단계: 코어 + SQLite/메모리 + 디스코드 봇 + PM2 상시구동 — 구현 계획"
+status: Superseded
+shippedIn: phase1
+supersededBy: "ADR 0001(Postgres 이전), ADR 0002(Railway+로컬 워커 하이브리드)"
+---
+
+> **⚠️ SUPERSEDED (점-시점 기록):** 저장소는 이후 Postgres로 이전(ADR 0001), 배포는 Railway+로컬 워커 하이브리드(ADR 0002)로 바뀌었습니다. 현재 구조는 `docs/architecture/overview.md`, 현재 상태는 `docs/status/STATUS.md`를 보세요. 이 문서는 당시 설계를 그대로 보존합니다.
+
 # 1단계: 코어 + SQLite/메모리 + 디스코드 봇 + PM2 상시구동 — 구현 계획
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

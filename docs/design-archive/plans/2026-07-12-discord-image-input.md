@@ -1,3 +1,9 @@
+---
+title: "디스코드 이미지 입력(멀티모달) Implementation Plan"
+status: Shipped
+shippedIn: 7215725
+---
+
 # 디스코드 이미지 입력(멀티모달) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

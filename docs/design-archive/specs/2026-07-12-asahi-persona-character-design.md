@@ -1,3 +1,9 @@
+---
+title: "Asahi 캐릭터/페르소나 시스템 설계"
+status: Shipped
+shippedIn: 15907fb
+---
+
 # Asahi 캐릭터/페르소나 시스템 설계
 
 - 날짜: 2026-07-12

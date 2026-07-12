@@ -1,3 +1,12 @@
+---
+title: '개인 AI 비서 "상주 에이전트" 설계 문서'
+status: Superseded
+shippedIn: phase1 초기
+supersededBy: "ADR 0001(Postgres 이전), ADR 0002(Railway+로컬 워커 하이브리드)"
+---
+
+> **⚠️ SUPERSEDED (점-시점 기록):** 저장소는 이후 Postgres로 이전(ADR 0001), 배포는 Railway+로컬 워커 하이브리드(ADR 0002)로 바뀌었습니다. 현재 구조는 `docs/architecture/overview.md`, 현재 상태는 `docs/status/STATUS.md`를 보세요. 이 문서는 당시 설계를 그대로 보존합니다.
+
 # 개인 AI 비서 "상주 에이전트" 설계 문서
 
 - **작성일**: 2026-07-11

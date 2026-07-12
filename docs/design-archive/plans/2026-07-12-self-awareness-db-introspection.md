@@ -1,3 +1,9 @@
+---
+title: "자기인지 — DB introspection + 런타임 인지 + Opus 4.8 Implementation Plan"
+status: Shipped
+shippedIn: 039f91a
+---
+
 # 자기인지 — DB introspection + 런타임 인지 + Opus 4.8 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
