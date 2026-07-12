@@ -123,6 +123,27 @@ describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 
     expect(owner.repos.allowedDirs.list()).toEqual([]);
   });
 
+  it("심링크(정션)로 등록해도 실경로로 정규화해 저장한다(과차단 방지, 보안리뷰 #4)", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-realdir-"));
+    const link = path.join(os.tmpdir(), `asahi-junction-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      fs.symlinkSync(target, link, "junction");
+    } catch {
+      // 이 환경에서 정션/심링크 생성 권한이 없으면 스킵한다(코드리뷰로 갈음).
+      return;
+    }
+    try {
+      const real = fs.realpathSync(link);
+      const out = allowDirHandler(owner, { path: link });
+      expect(owner.repos.allowedDirs.list()).toEqual([real]);
+      expect(owner.repos.allowedDirs.list()).not.toContain(path.resolve(link));
+      expect(out).toContain(real);
+    } finally {
+      fs.rmSync(link, { recursive: true, force: true });
+    }
+  });
+
   it("revoke_dir 은 허용 목록에서 제거한다", () => {
     const owner = ctx({ isOwner: true, isPrivate: true });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-revokedir-"));

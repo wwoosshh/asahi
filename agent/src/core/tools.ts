@@ -65,8 +65,11 @@ export function allowDirHandler(ctx: ToolCtx, args: { path: string }): string {
     return `경로를 찾을 수 없어요: ${args.path}`;
   }
   if (!stat.isDirectory()) return `디렉토리가 아니에요: ${args.path}`;
-  ctx.repos.allowedDirs.add(args.path);
-  return `허용 폴더에 추가했어요: ${path.resolve(args.path)}`;
+  // 보안리뷰 #4: 심볼릭 링크/정션으로 등록하면 canUseTool 의 realpath 후보와 어긋나 통째로 과차단되므로,
+  // statSync 로 존재를 확인한 뒤 실경로로 저장한다(normalizeDir 자체는 순수 함수로 그대로 둔다).
+  const real = fs.realpathSync(args.path);
+  ctx.repos.allowedDirs.add(real);
+  return `허용 폴더에 추가했어요: ${path.resolve(real)}`;
 }
 
 export function revokeDirHandler(ctx: ToolCtx, args: { path: string }): string {

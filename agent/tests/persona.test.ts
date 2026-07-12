@@ -30,6 +30,15 @@ describe("buildSystemPrompt", () => {
     expect(p).toMatch(/파일/);
   });
 
+  it("owner+DM 이면 Bash 봉쇄를 과장하지 않고, 폴더 밖·시스템·네트워크 작업은 하지 말라고 안내한다(보안리뷰 #2)", () => {
+    const p = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true });
+    expect(p).toMatch(/Bash/);
+    // "Bash 도 허용 폴더 안에서만 가능하다"는 실제보다 강한(거짓) 보장 문구는 없어야 한다.
+    expect(p).not.toMatch(/파일\s*[·,]?\s*셸\(?Bash\)?\s*작업은[^.]*허용\s*폴더\s*안에서만\s*가능/);
+    expect(p).toMatch(/완전히 막지/);
+    expect(p).toMatch(/네트워크/);
+  });
+
   it("손님 DM 이면 대화·본인 기억만 가능하다는 안내를 포함하고, 파일/manage_access 능력은 언급하지 않는다", () => {
     const p = buildSystemPrompt({ role: "allowed", isPrivate: true, isOwner: false });
     expect(p).toMatch(/기억/);

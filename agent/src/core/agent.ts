@@ -93,9 +93,11 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       const allowedDirs = repos.allowedDirs.list();
-      const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath);
+      const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath, req.cwd);
       const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
-      const decision = decidePathPermission(toolName, resolvedPaths, { isOwnerDm, allowedDirs });
+      // 보안리뷰 #2: dangerouslyDisableSandbox 로 남은 봉쇄까지 무력화하는 걸 canUseTool 이 항상 막는다.
+      const dangerouslyDisableSandbox = toolName === "Bash" && input.dangerouslyDisableSandbox === true;
+      const decision = decidePathPermission(toolName, resolvedPaths, { isOwnerDm, allowedDirs, dangerouslyDisableSandbox });
       return decision.behavior === "allow" ? { behavior: "allow" } : { behavior: "deny", message: decision.message };
     };
 

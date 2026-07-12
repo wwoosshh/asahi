@@ -108,6 +108,25 @@ describe("decidePathPermission — 순수 판정 함수", () => {
     it("소유자 DM 이 아니면 경로 유무와 상관없이 deny", () => {
       expect(decidePathPermission("Bash", [], { isOwnerDm: false, allowedDirs: ["C:\\proj\\a"] }).behavior).toBe("deny");
     });
+
+    it("dangerouslyDisableSandbox=true 면 소유자 DM·허용폴더 내부라도 무조건 deny(보안리뷰 #2)", () => {
+      const result = decidePathPermission("Bash", ["C:\\proj\\a\\sub"], {
+        isOwnerDm: true,
+        allowedDirs: ["C:\\proj\\a"],
+        dangerouslyDisableSandbox: true,
+      });
+      expect(result.behavior).toBe("deny");
+    });
+
+    it("dangerouslyDisableSandbox 가 없거나 false 면 기존 판정을 그대로 따른다", () => {
+      expect(
+        decidePathPermission("Bash", ["C:\\proj\\a\\sub"], {
+          isOwnerDm: true,
+          allowedDirs: ["C:\\proj\\a"],
+          dangerouslyDisableSandbox: false,
+        }),
+      ).toEqual({ behavior: "allow" });
+    });
   });
 });
 
@@ -130,6 +149,89 @@ describe("extractCandidatePaths — canUseTool 입력에서 경로 추출", () =
 
   it("그 외 도구는 항상 빈 배열", () => {
     expect(extractCandidatePaths("mcp__asahi__remember", { title: "t", content: "c" })).toEqual([]);
+  });
+
+  describe("Glob pattern 경로 집행(보안리뷰 #1) — pattern 도 검사 후보에 넣는다", () => {
+    it("path 없이 pattern 이 절대경로면 그 리터럴 접두를 후보로 뽑는다", () => {
+      expect(extractCandidatePaths("Glob", { pattern: "C:\\other\\**" })).toEqual(["C:\\other"]);
+    });
+
+    it("path 있고 pattern 이 ../ 로 상위 탈출하면 결합·정규화된 경로가 후보에 포함된다", () => {
+      const result = extractCandidatePaths("Glob", { path: "C:\\proj\\a", pattern: "../../x/**" });
+      expect(result).toContain("C:\\proj\\a");
+      expect(result).toContain(path.resolve("C:\\proj\\a", "../../x"));
+    });
+
+    it("path 있고 pattern 이 하위 상대경로면 결합한 경로가 후보에 포함된다", () => {
+      const result = extractCandidatePaths("Glob", { path: "C:\\proj\\a", pattern: "sub/**" });
+      expect(result).toContain(path.resolve("C:\\proj\\a", "sub"));
+    });
+
+    it("path 없고 pattern 이 상대경로면 cwd 기준으로 resolve 한다", () => {
+      const result = extractCandidatePaths("Glob", { pattern: "sub/**" }, undefined, "C:\\proj\\a");
+      expect(result).toContain(path.resolve("C:\\proj\\a", "sub"));
+    });
+
+    it("pattern 이 메타문자로 시작해 리터럴 접두가 없으면 pattern 후보를 추가하지 않는다(중복 방지)", () => {
+      expect(extractCandidatePaths("Glob", { pattern: "*.ts", path: "C:\\a" })).toEqual(["C:\\a"]);
+    });
+
+    it("Grep 의 pattern 은 정규식이므로 건드리지 않는다(메타문자가 있어도 무시)", () => {
+      expect(extractCandidatePaths("Grep", { pattern: "a*b[c]{2}" })).toEqual([]);
+      expect(extractCandidatePaths("Grep", { pattern: "a*b", path: "C:\\a" })).toEqual(["C:\\a"]);
+    });
+  });
+
+  describe("후보가 비면 cwd 를 후보로 넣는다(보안리뷰 #3)", () => {
+    it("Bash: blockedPath 없고 cwd 있으면 cwd 를 후보로", () => {
+      expect(extractCandidatePaths("Bash", { command: "ls" }, undefined, "C:\\proj\\a")).toEqual(["C:\\proj\\a"]);
+    });
+
+    it("Glob: path/pattern 둘 다 없고 cwd 있으면 cwd 를 후보로", () => {
+      expect(extractCandidatePaths("Glob", {}, undefined, "C:\\proj\\a")).toEqual(["C:\\proj\\a"]);
+    });
+
+    it("Grep: path 없고 cwd 있으면 cwd 를 후보로", () => {
+      expect(extractCandidatePaths("Grep", { pattern: "foo" }, undefined, "C:\\proj\\a")).toEqual(["C:\\proj\\a"]);
+    });
+
+    it("cwd 도 없으면 기존처럼 빈 배열(회귀 유지)", () => {
+      expect(extractCandidatePaths("Bash", { command: "ls" })).toEqual([]);
+    });
+  });
+
+  describe("통합: extractCandidatePaths → decidePathPermission (보안리뷰 #1/#3 시나리오)", () => {
+    const allowedDirs = ["C:\\proj\\a"];
+
+    it("Glob {pattern: 절대경로}(path 없음) → 허용폴더 밖이면 deny", () => {
+      const candidates = extractCandidatePaths("Glob", { pattern: "C:\\other\\**" });
+      const result = decidePathPermission("Glob", candidates, { isOwnerDm: true, allowedDirs });
+      expect(result.behavior).toBe("deny");
+    });
+
+    it("Glob {path: 허용, pattern: '../../x/**'} → 밖이면 deny", () => {
+      const candidates = extractCandidatePaths("Glob", { path: "C:\\proj\\a", pattern: "../../x/**" });
+      const result = decidePathPermission("Glob", candidates, { isOwnerDm: true, allowedDirs });
+      expect(result.behavior).toBe("deny");
+    });
+
+    it("Glob {path: 허용, pattern: 'sub/**'} → 안이면 allow", () => {
+      const candidates = extractCandidatePaths("Glob", { path: "C:\\proj\\a", pattern: "sub/**" });
+      const result = decidePathPermission("Glob", candidates, { isOwnerDm: true, allowedDirs });
+      expect(result).toEqual({ behavior: "allow" });
+    });
+
+    it("후보가 빈 경우 cwd 로 대체되고, cwd 가 밖이면 deny", () => {
+      const candidates = extractCandidatePaths("Bash", { command: "ls" }, undefined, "C:\\other");
+      const result = decidePathPermission("Bash", candidates, { isOwnerDm: true, allowedDirs });
+      expect(result.behavior).toBe("deny");
+    });
+
+    it("후보가 빈 경우 cwd 로 대체되고, cwd 가 안이면 allow", () => {
+      const candidates = extractCandidatePaths("Bash", { command: "ls" }, undefined, "C:\\proj\\a\\sub");
+      const result = decidePathPermission("Bash", candidates, { isOwnerDm: true, allowedDirs });
+      expect(result).toEqual({ behavior: "allow" });
+    });
   });
 });
 
