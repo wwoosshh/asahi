@@ -6,15 +6,20 @@ import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { MemoriesRepo, Memory } from "../store/memoriesRepo.js";
 import type { AllowedDirsRepo } from "../store/allowedDirsRepo.js";
+import type { IntrospectRepo } from "../store/introspectRepo.js";
+import { assertReadOnlySql, formatQueryResult } from "./sqlGuard.js";
 
 // 도구 서버 이름 → 모델에는 mcp__asahi__<tool> 로 노출된다.
 export const TOOL_SERVER = "asahi";
 const FILE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"];
 const t = (name: string): string => `mcp__${TOOL_SERVER}__${name}`;
 
+// 자기인지(§Task4): 이 봇이 어떤 모델·SDK·배포 설정으로 동작 중인지. runtime_info 도구가 그대로 보고한다.
+export type RuntimeInfo = { model: string; sdkVersion: string; deployTarget: "local" | "cloud"; maxTurns: number };
+
 // 현재 턴의 상대·대화 컨텍스트를 클로저로 받는다. 도구 handler 는 이걸로 스코프를 강제한다.
 export type ToolCtx = {
-  repos: { memories: MemoriesRepo; users: UsersRepo; allowedDirs: AllowedDirsRepo };
+  repos: { memories: MemoriesRepo; users: UsersRepo; allowedDirs: AllowedDirsRepo; introspect: IntrospectRepo };
   role: Role;
   isPrivate: boolean;
   isOwner: boolean;
@@ -24,6 +29,7 @@ export type ToolCtx = {
   // 손님이라도 자기 PC 이므로 PC 도구를 열어준다(아래 canManagePc/allowedToolsFor 참고).
   // manage_access·recall 전원열람 등 신원 기반 특권에는 영향을 주지 않는다(isOwner 로만 판정).
   ownWorkstation?: boolean;
+  runtime: RuntimeInfo;
 };
 
 // PC 관리 도구(allow_dir/revoke_dir/list_dirs)를 쓸 수 있는 신원인지: 소유자 DM, 또는
@@ -95,6 +101,39 @@ export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
   return dirs.map((d) => `- ${d}`).join("\n");
 }
 
+// 자기인지 도구(§Task4): 소유자 DM 전용 — db_schema/db_query/runtime_info.
+// 손님·서버·ownWorkstation 은 어느 경우에도 노출·실행 둘 다 거부한다(isOwner && isPrivate 로만 판정).
+const OWNER_DM_ONLY_DB = "이 작업은 소유자 DM에서만 할 수 있어요.";
+function isOwnerDm(ctx: ToolCtx): boolean { return ctx.isOwner && ctx.isPrivate; }
+
+export async function dbSchemaHandler(ctx: ToolCtx): Promise<string> {
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  return await ctx.repos.introspect.schema();
+}
+
+export async function dbQueryHandler(ctx: ToolCtx, args: { sql: string }): Promise<string> {
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  try { assertReadOnlySql(args.sql); } catch (e) { return e instanceof Error ? e.message : "잘못된 쿼리예요."; }
+  try {
+    const { rows, truncated } = await ctx.repos.introspect.readOnlyQuery(args.sql);
+    return formatQueryResult(rows, truncated);
+  } catch (e) {
+    return `쿼리 실행 오류: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+export async function runtimeInfoHandler(ctx: ToolCtx): Promise<string> {
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  const r = ctx.runtime;
+  return [
+    `모델(설정): ${r.model}`,
+    `SDK: @anthropic-ai/claude-agent-sdk@${r.sdkVersion}`,
+    `배포 대상: ${r.deployTarget}`,
+    `한 응답 내 도구 반복 상한(maxTurns): ${r.maxTurns}`,
+    `한도: 소유자는 무제한, 손님은 시간당 제한(유저별/전역).`,
+  ].join("\n");
+}
+
 // ── 턴별 도구셋(능력 계층, §7.1) ────────────────────────────────────────────
 // owner-DM → 파일 도구 + Bash + 기억 + 접근관리 + 허용폴더 관리. 손님 DM → 기억(본인)만. 서버 → recall(공용)만.
 // deployTarget="cloud"(Railway 조각2): 소유자 PC 가 없는 컨테이너 실행이므로 owner-DM 이라도 PC 도구
@@ -112,12 +151,13 @@ export function allowedToolsFor(
 ): string[] {
   if (isOwner && isPrivate) {
     if (deployTarget === "cloud") {
-      return [t("remember"), t("recall"), t("manage_access")];
+      return [t("remember"), t("recall"), t("manage_access"), t("db_schema"), t("db_query"), t("runtime_info")];
     }
     return [
       ...FILE_TOOLS, "Bash",
       t("remember"), t("recall"), t("manage_access"),
       t("allow_dir"), t("revoke_dir"), t("list_dirs"),
+      t("db_schema"), t("db_query"), t("runtime_info"),
     ];
   }
   if (ownWorkstation && isPrivate && deployTarget !== "cloud") {
@@ -174,6 +214,24 @@ export function buildTools(ctx: ToolCtx) {
         "(소유자 전용) 현재 허용된 폴더 목록을 보여줍니다.",
         {},
         async () => textResult(await listDirsHandler(ctx)),
+      ),
+      tool(
+        "db_schema",
+        "(소유자 전용) 내 데이터베이스의 테이블·컬럼 구조를 보여줍니다.",
+        {},
+        async () => textResult(await dbSchemaHandler(ctx)),
+      ),
+      tool(
+        "db_query",
+        "(소유자 전용) 읽기 전용 SELECT 로 내 데이터를 조회합니다. SELECT 만 가능합니다.",
+        { sql: z.string().describe("실행할 읽기 전용 SELECT 문") },
+        async (args) => textResult(await dbQueryHandler(ctx, args)),
+      ),
+      tool(
+        "runtime_info",
+        "(소유자 전용) 내가 어떤 모델·SDK·배포 설정으로 동작 중인지 보여줍니다.",
+        {},
+        async () => textResult(await runtimeInfoHandler(ctx)),
       ),
     ],
   });

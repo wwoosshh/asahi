@@ -3,22 +3,35 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openTestDb } from "../src/store/db.js";
+import { IntrospectRepo } from "../src/store/introspectRepo.js";
 import { MemoriesRepo } from "../src/store/memoriesRepo.js";
 import { UsersRepo } from "../src/store/usersRepo.js";
 import { AllowedDirsRepo } from "../src/store/allowedDirsRepo.js";
 import {
   rememberHandler, recallHandler, manageAccessHandler,
   allowDirHandler, revokeDirHandler, listDirsHandler,
+  dbSchemaHandler, dbQueryHandler, runtimeInfoHandler,
   allowedToolsFor, type ToolCtx,
 } from "../src/core/tools.js";
 
 async function ctx(over: Partial<ToolCtx> = {}): Promise<ToolCtx> {
   const db = await openTestDb();
   return {
-    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db) },
+    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db), introspect: new IntrospectRepo(db) },
     role: "allowed", isPrivate: true, isOwner: false, userId: "guest", conversationId: 1,
+    runtime: { model: "claude-opus-4-8", sdkVersion: "0.3.207", deployTarget: "local", maxTurns: 30 },
     ...over,
   };
+}
+
+async function ownerCtx(over = {}) {
+  const db = await openTestDb();
+  return {
+    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(db), introspect: new IntrospectRepo(db) },
+    role: "owner", isPrivate: true, isOwner: true, userId: "owner", conversationId: 1,
+    runtime: { model: "claude-opus-4-8", sdkVersion: "0.3.207", deployTarget: "local", maxTurns: 30 },
+    ...over,
+  } as any;
 }
 
 describe("remember 도구", () => {
@@ -251,12 +264,15 @@ describe("allowedToolsFor — 능력 계층(§7.1)", () => {
     expect(allowedToolsFor("owner", false, false)).toEqual(allowedToolsFor("owner", false, false, "local"));
   });
 
-  it("deployTarget='cloud' + 소유자 DM 이면 PC 도구(파일·Bash·dir 관리)를 빼고 remember/recall/manage_access 만 남는다", () => {
+  it("deployTarget='cloud' + 소유자 DM 이면 PC 도구(파일·Bash·dir 관리)를 빼고 remember/recall/manage_access/db_schema/db_query/runtime_info 만 남는다", () => {
     const tools = allowedToolsFor("owner", true, true, "cloud");
     expect(tools).toEqual([
       "mcp__asahi__remember",
       "mcp__asahi__recall",
       "mcp__asahi__manage_access",
+      "mcp__asahi__db_schema",
+      "mcp__asahi__db_query",
+      "mcp__asahi__runtime_info",
     ]);
     expect(tools).not.toContain("Read");
     expect(tools).not.toContain("Write");
@@ -308,5 +324,54 @@ describe("allowedToolsFor — 능력 계층(§7.1)", () => {
       expect(tools).not.toContain("Read");
       expect(tools).not.toContain("Bash");
     });
+  });
+});
+
+describe("db_query 게이팅·안전", () => {
+  it("소유자가 아니면 거부한다", async () => {
+    const ctx = await ownerCtx({ isOwner: false });
+    expect(await dbQueryHandler(ctx, { sql: "SELECT 1" })).toMatch(/소유자/);
+  });
+  it("비공개(DM)가 아니면 거부한다", async () => {
+    const ctx = await ownerCtx({ isPrivate: false });
+    expect(await dbQueryHandler(ctx, { sql: "SELECT 1" })).toMatch(/소유자|DM/);
+  });
+  it("쓰기 SQL 은 사전검사로 거부한다", async () => {
+    const ctx = await ownerCtx();
+    expect(await dbQueryHandler(ctx, { sql: "DELETE FROM messages" })).toMatch(/읽기 전용|SELECT/);
+  });
+  it("소유자 정상 SELECT 는 결과를 반환한다", async () => {
+    const ctx = await ownerCtx();
+    const out = await dbQueryHandler(ctx, { sql: "SELECT 1 AS n" });
+    expect(out).toMatch(/n/);
+  });
+});
+
+describe("runtime_info", () => {
+  it("소유자에게 모델·배포·maxTurns 를 보고한다", async () => {
+    const ctx = await ownerCtx();
+    const out = await runtimeInfoHandler(ctx);
+    expect(out).toMatch(/claude-opus-4-8/);
+    expect(out).toMatch(/local/);
+    expect(out).toMatch(/30/);
+  });
+  it("소유자가 아니면 거부한다", async () => {
+    expect(await runtimeInfoHandler(await ownerCtx({ isOwner: false }))).toMatch(/소유자/);
+  });
+});
+
+describe("allowedToolsFor — db 도구 노출", () => {
+  it("소유자 DM(local·cloud)에 db_schema/db_query/runtime_info 를 노출한다", () => {
+    for (const dt of ["local", "cloud"] as const) {
+      const tools = allowedToolsFor("owner", true, true, dt);
+      expect(tools).toContain("mcp__asahi__db_query");
+      expect(tools).toContain("mcp__asahi__db_schema");
+      expect(tools).toContain("mcp__asahi__runtime_info");
+    }
+  });
+  it("손님 DM·서버·손님 자기PC(ownWorkstation)엔 노출하지 않는다", () => {
+    expect(allowedToolsFor("allowed", true, false, "local")).not.toContain("mcp__asahi__db_query");
+    expect(allowedToolsFor("allowed", false, false, "local")).not.toContain("mcp__asahi__db_query");
+    expect(allowedToolsFor("allowed", true, false, "local", true)).not.toContain("mcp__asahi__db_query");
   });
 });
