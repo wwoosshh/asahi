@@ -4,8 +4,14 @@ import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { AllowedDirsRepo } from "../store/allowedDirsRepo.js";
-import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx } from "./tools.js";
+import type { IntrospectRepo } from "../store/introspectRepo.js";
+import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx, type RuntimeInfo } from "./tools.js";
 import { decidePathPermission, isPathGatedTool, extractCandidatePaths, resolveRealOrNearestAncestor } from "./pathPermission.js";
+
+// 자기인지(§Task5): SDK_VERSION 은 package.json 의 @anthropic-ai/claude-agent-sdk 버전과 동기화한다.
+// DEFAULT_MODEL 은 makeRunAgentTurn 의 model 인자가 없을 때 쓰는 기본 모델이다.
+const SDK_VERSION = "0.3.207"; // package.json 과 동기화
+const DEFAULT_MODEL = "claude-opus-4-8";
 
 // 현재 턴의 상대·대화 컨텍스트. 이걸로 role·is_private 별 도구셋(allowedTools)을 정한다(§7.1).
 // ownWorkstation(하이브리드 조각3): 로컬 워커가 이 턴을 그 사용자 자신의 PC 에서 실행 중이면 true —
@@ -20,7 +26,7 @@ export type TurnRequest = { prompt: string; systemPrompt: string; resume?: strin
 export type TurnResult = { text: string; sessionId?: string; ok: boolean };
 export type TurnRunner = (req: TurnRequest) => Promise<TurnResult>;
 
-export type ToolRepos = { memories: MemoriesRepo; users: UsersRepo; allowedDirs: AllowedDirsRepo };
+export type ToolRepos = { memories: MemoriesRepo; users: UsersRepo; allowedDirs: AllowedDirsRepo; introspect: IntrospectRepo };
 
 // mcp__asahi__recall → recall 처럼 인프로세스 MCP 접두어를 벗겨 짧게 만든다. 접두어가 없으면 그대로.
 export function shortToolName(name: string): string {
@@ -80,11 +86,14 @@ export function progressFromMessage(message: ProgressSourceMessage, pendingToolN
 // (워커가 이 턴을 손님 자신의 PC 에서 실행 중이어도 allow_dir/revoke_dir/list_dirs·파일 경로 게이트가
 // "소유자 DM 전용"으로 막혀버림). 별도 함수로 뽑아 TurnContext 의 모든 필드가 빠짐없이 옮겨지는지
 // 이 함수 자체를 직접 테스트할 수 있게 한다(agent.test.ts).
-export function buildToolCtx(repos: ToolRepos, context: TurnContext): ToolCtx {
+// 자기인지(§Task5): runtime(RuntimeInfo) 을 별도 인자로 받아 ctx.runtime 에 그대로 싣는다. repos 는
+// 그대로 넘기기만 하면 introspect 도 함께 옮겨진다(ToolRepos 에 introspect 가 포함돼 있으므로).
+export function buildToolCtx(repos: ToolRepos, context: TurnContext, runtime: RuntimeInfo): ToolCtx {
   return {
     repos, role: context.role, isPrivate: context.isPrivate,
     isOwner: context.isOwner, userId: context.userId, conversationId: context.conversationId,
     ownWorkstation: context.ownWorkstation,
+    runtime,
   };
 }
 
@@ -92,9 +101,12 @@ export function buildToolCtx(repos: ToolRepos, context: TurnContext): ToolCtx {
 // 인프로세스 도구(remember/recall/manage_access)와 allowedTools 를 구성한다.
 // deployTarget(Railway 조각2, 기본 local): cloud 면 owner-DM 이라도 PC 도구(파일/Bash)를 allowedToolsFor
 // 단계에서 이미 뺀다. canUseTool 에서도 이중방어로 즉시 거부한다(아래 참고).
-export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "cloud" = "local"): TurnRunner {
+// model(자기인지 §Task5, 기본 DEFAULT_MODEL): query() 에 그대로 전달되고, ctx.runtime.model 로도 실려
+// runtime_info 도구가 "설정값"으로 보고한다. init 메시지의 실제 model 과 다르면 아래에서 warn 로그를 남긴다.
+export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "cloud" = "local", model: string = DEFAULT_MODEL): TurnRunner {
   return async (req) => {
-    const ctx: ToolCtx = buildToolCtx(repos, req.context);
+    const runtime: RuntimeInfo = { model, sdkVersion: SDK_VERSION, deployTarget, maxTurns: 30 };
+    const ctx: ToolCtx = buildToolCtx(repos, req.context, runtime);
     const server = buildTools(ctx);
     const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner, deployTarget, req.context.ownWorkstation);
     // 파일/Bash 는 canUseTool(decidePathPermission) 을 반드시 거치도록 bare 사전승인 목록에서 뺀다 —
@@ -144,6 +156,7 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
         tools: builtinTools,
         mcpServers: { [TOOL_SERVER]: server },
         permissionMode: "default",
+        model,
         canUseTool,
         additionalDirectories,
         maxTurns: 30,
@@ -156,6 +169,11 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
       }
       if (message.type === "system" && message.subtype === "init") {
         sessionId = message.session_id;
+        // 자기인지(§Task5): 설정한 model 과 SDK 가 실제로 실행한 model 이 다르면(예: 모델 별칭이 다른
+        // 버전으로 라우팅됨) 즉시 알아챌 수 있도록 warn 으로 남긴다. 같으면 확인용 info 로그만.
+        const actual = (message as { model?: string }).model;
+        if (actual && actual !== model) console.warn(`[agent] 설정 모델(${model}) ≠ 실제 실행 모델(${actual})`);
+        else if (actual) console.log(`[agent] 실행 모델: ${actual}`);
       }
       if (message.type === "result") {
         sessionId = message.session_id ?? sessionId;
