@@ -118,7 +118,7 @@ E:/Asahi/
 
 | 외부 메모리 | → 리포 목적지 | 새니타이즈 |
 |---|---|---|
-| `project-status.md` | `docs/status/STATUS.md` + `ROADMAP.md` | Discord owner ID·앱 ID(`1525474…`)·`.env` 경로 제거 |
+| `project-status.md` | `docs/status/STATUS.md` + `ROADMAP.md` | Discord owner ID·앱 ID·`.env` 경로 제거 |
 | `security-capability-model.md` | `docs/security/capability-model.md` + 루트 `SECURITY.md` | 악용 경로 일반화(D3 완화 서술) |
 | `github-repo.md` | `README`/`CONTRIBUTING` 배포 섹션 | 공개 정보라 그대로 |
 

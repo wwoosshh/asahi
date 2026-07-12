@@ -125,4 +125,4 @@ flowchart LR
 - 위협 모델·알려진 한계: `SECURITY.md`, `docs/security/risk-register.md`
 - 현재 라이브 상태·미완 항목: `docs/status/STATUS.md`
 - 배포 절차: `deploy/railway-셋업.md`, `deploy/worker-셋업.md`, `deploy/다른-PC-셋업.md`
-- 데이터 흐름 상세(메시지 → 저장 → 응답 경로): `docs/architecture/data-flow.md` (아직 작성 전)
+- 데이터 흐름 상세(메시지 → 저장 → 응답 경로): `docs/architecture/data-flow.md`

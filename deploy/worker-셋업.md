@@ -44,11 +44,11 @@ npm run build
 npx tsx src/worker.ts
 ```
 
-- `npm run build`(tsc)로 `dist/`를 만든 뒤에는 `node dist/worker.js`로도 띄울 수 있다.
-- 지금은 `package.json`에 전용 `npm run worker` 스크립트가 아직 없다(추가 예정) — 그 전까지는
-  위처럼 `npx tsx src/worker.ts`(빌드 없이 즉시 실행) 또는 빌드 후 `node dist/worker.js`를 쓴다.
-- PM2로 상시구동(`asahi-worker` 앱)하는 절차도 같은 후속 작업에서 `deploy/ecosystem.config.cjs`에
-  추가될 예정이며, 그때까지는 터미널에서 직접(또는 자체 PM2 설정으로) 띄워 둔다.
+- `npm run worker`로 빌드 없이(개발 중) 바로 실행하거나, `npm run build` 후 `npm run worker:start`
+  (또는 `node dist/worker.js`)로 빌드된 산출물을 실행할 수 있다. `npx tsx src/worker.ts`로 직접
+  실행해도 동일하게 동작한다.
+- PM2로 상시구동할 때는 `asahi-worker` 앱으로 실행한다(`deploy/ecosystem.config.cjs`,
+  `deploy/PM2-명령어.md` 참고).
 
 ## 검증
 

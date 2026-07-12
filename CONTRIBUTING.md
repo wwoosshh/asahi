@@ -17,7 +17,7 @@ lastReviewed: 2026-07-13
 
 ## 환경변수 준비
 
-`.env`는 리포 루트(`E:\Asahi\.env`)에 둔다. 항목별 설명은 [.env.example](.env.example)에
+`.env`는 리포 루트(`<repo>/.env`)에 둔다. 항목별 설명은 [.env.example](.env.example)에
 전부 있고, 그중 실제로 봇을 실행해보려면 다음 세 가지를 직접 발급받아야 한다.
 
 - **`DISCORD_OWNER_ID`** — 본인의 디스코드 사용자 ID. 디스코드 앱에서 설정 → 고급 →
@@ -62,9 +62,9 @@ npm run dev
 
 로컬 워커(`agent/src/worker.ts`)는 소유자 PC에서 파일/Bash 같은 PC 작업을 대신 실행해주는
 별도 프로세스다(하이브리드 구조는 [docs/architecture/overview.md](docs/architecture/overview.md)
-참고). 전용 `npm run worker` 스크립트와 셋업 가이드(`deploy/worker-셋업.md`)는 아직 없고
-Task 20에서 추가될 예정이다 — 지금 당장 띄워보려면 `agent/` 안에서 `npx tsx src/worker.ts`로
-직접 실행하고, `.env`에 `WORKER_USER_ID`(소유자 자신의 디스코드 ID)를 채워둬야 한다.
+참고). `npm run worker`로 로컬 워커를 실행할 수 있고, 자세한 건
+[deploy/worker-셋업.md](deploy/worker-셋업.md) 참고 — `.env`에
+`WORKER_USER_ID`(소유자 자신의 디스코드 ID)를 채워둬야 한다.
 
 ## 빌드 / 프로덕션 실행
 

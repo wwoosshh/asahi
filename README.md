@@ -43,7 +43,7 @@ npm test          # 단위 테스트 (vitest)
 npm run dev       # 개발 실행 (루트의 .env 필요 — .env.example 참고)
 ```
 
-`.env`는 리포 루트(`E:\Asahi\.env`)에 둔다. `DATABASE_URL`(Supabase **Session pooler** 연결
+`.env`는 리포 루트(`<repo>/.env`)에 둔다. `DATABASE_URL`(Supabase **Session pooler** 연결
 문자열)이 필수다 — 형식·발급 방법은 [deploy/railway-셋업.md](deploy/railway-셋업.md) 참고.
 
 ## 상시 구동

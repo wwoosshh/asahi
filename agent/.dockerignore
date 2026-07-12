@@ -16,7 +16,6 @@ vitest.config.ts
 
 # 문서 / 잡파일.
 *.md
-윈도우자동실행.txt
 
 # 기타 흔한 노이즈.
 .git

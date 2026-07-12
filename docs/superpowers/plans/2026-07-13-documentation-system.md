@@ -399,7 +399,7 @@ front-matter(`lastReviewed: 2026-07-13`) + 섹션:
 - **미완/미검증**: 실 Supabase 스모크 항목(READ ONLY 쓰기거부·워커 실통신·이미지 인식·`/새세션` 톤) → `deploy/smoke-test.md` 링크.
 - **알려진 한계**: 하드 크래시 중 전송 1건 유실 가능 등.
 
-**새니타이즈(필수):** Discord owner ID, 앱 ID(`1525474…`), `.env`/`DATABASE_URL` 실제 값·경로, 개인 식별정보를 **제거/일반화**. 커밋 전 Step 4 grep 게이트.
+**새니타이즈(필수):** Discord owner ID, 앱 ID, `.env`/`DATABASE_URL` 실제 값·경로, 개인 식별정보를 **제거/일반화**. 커밋 전 Step 4 grep 게이트.
 
 - [ ] **Step 3: `ROADMAP.md` 작성**
 
@@ -409,7 +409,7 @@ front-matter(`lastReviewed: 2026-07-13`) + 섹션:
 
 Run:
 ```bash
-grep -nE '1525474|[0-9]{17,19}|postgresql://|@aws-[0-9]' docs/status/STATUS.md docs/status/ROADMAP.md ; echo "exit=$?"
+grep -nE '[0-9]{17,19}|postgresql://|@aws-[0-9]' docs/status/STATUS.md docs/status/ROADMAP.md ; echo "exit=$?"
 ```
 Expected: 없음(`exit=1`). 만약 검출되면 새니타이즈 후 재검.
 
@@ -453,7 +453,7 @@ GitHub 표준 위치. 위협모델 요약(자산·행위자: 손님/관찰콘텐
 
 Run:
 ```bash
-grep -nE '1525474|[0-9]{17,19}|postgresql://' SECURITY.md docs/security/*.md ; echo "exit=$?"
+grep -nE '[0-9]{17,19}|postgresql://' SECURITY.md docs/security/*.md ; echo "exit=$?"
 for f in SECURITY.md docs/security/capability-model.md docs/security/risk-register.md; do test -f "$f" && echo "$f ok"; done
 ```
 Expected: grep 없음(`exit=1`), 3줄 `ok`

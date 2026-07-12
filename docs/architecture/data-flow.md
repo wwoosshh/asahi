@@ -159,9 +159,10 @@ sequenceDiagram
     else 그 외 전부
         Turn->>LLM: runTurn(prompt, resume?)
         LLM-->>Turn: TurnResult(성공/실패)
+        Turn->>DB: messages.insert(assistant)
     end
 
-    Turn->>DB: messages.insert(assistant) / markProcessed(messageId)
+    Turn->>DB: markProcessed(messageId)
     Turn->>Bus: publish(assistant_message | system_notice)
     Bus->>A: 구독 핸들러 → 디스코드 전송/편집
 
