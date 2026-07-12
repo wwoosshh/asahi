@@ -1,3 +1,5 @@
+import type { ImageRef } from "../core/images.js";
+
 export type ChannelKind = "discord";
 
 // 어댑터가 라우팅을 확정한 뒤 코어에 넘기는 대화 매핑 힌트(2B).
@@ -15,7 +17,7 @@ export type ConversationHint = {
   discordMessageId: string;    // 사용자 메시지 id (저장·중복방지)
 };
 
-export type UserMessageEvent = { type: "user_message"; channel: ChannelKind; channelRef: string; text: string; ts: number; hint?: ConversationHint };
+export type UserMessageEvent = { type: "user_message"; channel: ChannelKind; channelRef: string; text: string; ts: number; hint?: ConversationHint; images?: ImageRef[] };
 export type AssistantMessageEvent = { type: "assistant_message"; channel: ChannelKind; channelRef: string; text: string; ts: number };
 export type SystemNoticeEvent = { type: "system_notice"; channel: ChannelKind; channelRef: string; text: string; ts: number };
 // 턴 처리 중 진행 상황(도구 호출/결과/답변 시작 등)을 알리는 이벤트(2B). 실제 표시(전송·편집)는 어댑터 쪽 책임.

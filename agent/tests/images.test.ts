@@ -23,6 +23,10 @@ describe("filterImageAttachments", () => {
     const r = filterImageAttachments([att({ contentType: "IMAGE/JPEG; charset=binary", name: "d.jpg" })]);
     expect(r.images[0]?.mediaType).toBe("image/jpeg");
   });
+  it("contentType null 은 무시한다", () => {
+    const r = filterImageAttachments([{ url: "u", contentType: null, name: "x", size: 1 }]);
+    expect(r.images).toHaveLength(0);
+  });
 });
 
 describe("buildImageMarker", () => {

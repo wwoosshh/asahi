@@ -5,6 +5,7 @@ import type { EventBus, ConversationHint } from "../events/bus.js";
 import type { Config } from "../config.js";
 import type { UsersRepo, Role } from "../store/usersRepo.js";
 import type { ConversationsRepo } from "../store/conversationsRepo.js";
+import { filterImageAttachments, type ImageRef } from "../core/images.js";
 
 export function chunkMessage(text: string, max = 2000): string[] {
   const chunks: string[] = [];
@@ -33,6 +34,7 @@ export function chunkMessage(text: string, max = 2000): string[] {
 export type Incoming = {
   userId: string; channelId: string; isDM: boolean; isThread: boolean; mentionsBot: boolean;
   guildId?: string; parentChannelId?: string; content: string; messageId: string;
+  images: ImageRef[];
 };
 export type RouteDecision =
   | { kind: "ignore" }            // 게이트 탈락 / 관심 없는 메시지
@@ -186,6 +188,9 @@ export class DiscordAdapter {
     if (!bot) return;
 
     const isThread = message.channel.isThread();
+    const { images } = filterImageAttachments(
+      [...message.attachments.values()].map((a) => ({ url: a.url, contentType: a.contentType, name: a.name, size: a.size })),
+    );
     const incoming: Incoming = {
       userId: message.author.id,
       channelId: message.channelId,
@@ -196,6 +201,7 @@ export class DiscordAdapter {
       parentChannelId: isThread ? message.channel.parentId ?? undefined : undefined,
       content: message.content,
       messageId: message.id,
+      images,
     };
 
     const role = await this.users.getRole(incoming.userId);
@@ -221,6 +227,7 @@ export class DiscordAdapter {
       text: incoming.content,
       ts: Date.now(),
       hint,
+      images: incoming.images.length > 0 ? incoming.images : undefined,
     });
   }
 
