@@ -1,18 +1,24 @@
-import type Database from "better-sqlite3";
+import type { Db } from "./db.js";
 
+// T2/T3 Repo 패턴의 파일럿: 생성자는 Db(pg Pool) 를 받고, 모든 메서드는 async,
+// SQL 은 $n 파라미터 + ON CONFLICT 로 작성한다.
 export class SettingsRepo {
-  constructor(private db: Database.Database) {}
+  constructor(private db: Db) {}
 
-  get(key: string): string | null {
-    const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+  async get(key: string): Promise<string | null> {
+    const r = await this.db.query("SELECT value FROM settings WHERE key = $1", [key]);
+    const row = r.rows[0] as { value: string } | undefined;
     return row?.value ?? null;
   }
 
-  set(key: string, value: string): void {
-    this.db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+  async set(key: string, value: string): Promise<void> {
+    await this.db.query(
+      "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      [key, value],
+    );
   }
 
-  delete(key: string): void {
-    this.db.prepare("DELETE FROM settings WHERE key = ?").run(key);
+  async delete(key: string): Promise<void> {
+    await this.db.query("DELETE FROM settings WHERE key = $1", [key]);
   }
 }
