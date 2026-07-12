@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // Postgres DDL. better-sqlite3 -> pg 이전(feat/postgres-supabase-store)에서
 // 기존 SQLite 스키마(db.ts 의 legacy SCHEMA + 이 파일의 NEW_SCHEMA)를 하나로 합쳤다.
@@ -151,16 +151,28 @@ CREATE TABLE IF NOT EXISTS worker_jobs (
   conversation_id BIGINT NOT NULL,
   discord_channel_id TEXT NOT NULL,
   user_message TEXT NOT NULL,
+  message_id BIGINT,
   status TEXT NOT NULL DEFAULT 'pending',
   progress TEXT,
   result TEXT,
   error TEXT,
   created_ts BIGINT NOT NULL,
   claimed_ts BIGINT,
-  done_ts BIGINT
+  done_ts BIGINT,
+  delivered_ts BIGINT
 );
+-- 리뷰 #2/#5a 이전에 이미 만들어졌을 수 있는 환경을 위한 안전한 보강(이미 있으면 no-op).
+ALTER TABLE worker_jobs ADD COLUMN IF NOT EXISTS message_id BIGINT;
+ALTER TABLE worker_jobs ADD COLUMN IF NOT EXISTS delivered_ts BIGINT;
 CREATE INDEX IF NOT EXISTS idx_worker_jobs_user_status ON worker_jobs(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_worker_jobs_status ON worker_jobs(status);
+-- 리뷰 #2(HIGH): 위임 job 을 그 트리거 메시지(message_id)로 멱등화한다 — 봇 크래시 후 recoverPending 이
+-- 이미 위임(enqueue)까지 끝났던 메시지를 다시 위임 시도해도, 이 부분 유니크 인덱스 덕에 같은 job 에
+-- 합류할 뿐 중복 job(=중복 실행)을 만들지 않는다. NULL 은 여러 개 허용(messageId 를 안 주는 경로도 지원).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_worker_jobs_message_id ON worker_jobs(message_id) WHERE message_id IS NOT NULL;
+-- 리뷰 #5a(MED): 타임아웃 뒤늦게 끝난 job 의 결과가 유실되지 않도록 "배달(디스코드 발행) 완료" 여부를
+-- delivered_ts 로 추적한다(NULL=아직 안 보냄). 배달 스윕(core.ts deliverPendingJobResults)이 이걸로 스캔한다.
+CREATE INDEX IF NOT EXISTS idx_worker_jobs_undelivered ON worker_jobs(status) WHERE delivered_ts IS NULL;
 
 -- 사용자별 워커 생존 신호. 워커가 주기적으로 heartbeat 를 찍고, 봇은 isOnline(cutoff) 으로
 -- "지금 이 사용자의 워커가 떠 있는지" 를 판단한다(라우팅 판단은 W2/W3 몫).

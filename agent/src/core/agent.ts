@@ -73,16 +73,28 @@ export function progressFromMessage(message: ProgressSourceMessage, pendingToolN
   return updates;
 }
 
+// TurnContext → ToolCtx 로 옮기는 순수 함수(테스트 대상). 리뷰 #1: 예전엔 이 변환이
+// makeRunAgentTurn 안에 인라인 리터럴로 있었는데 ownWorkstation 필드를 빠뜨렸다 — allowedToolsFor 는
+// req.context.ownWorkstation 을 직접 봐서 도구 목록엔 allow_dir 등이 정상적으로 들어가지만, 정작
+// 도구 핸들러(canManagePc)가 받는 ctx.ownWorkstation 은 undefined 라 실행 시점에 거부당했다
+// (워커가 이 턴을 손님 자신의 PC 에서 실행 중이어도 allow_dir/revoke_dir/list_dirs·파일 경로 게이트가
+// "소유자 DM 전용"으로 막혀버림). 별도 함수로 뽑아 TurnContext 의 모든 필드가 빠짐없이 옮겨지는지
+// 이 함수 자체를 직접 테스트할 수 있게 한다(agent.test.ts).
+export function buildToolCtx(repos: ToolRepos, context: TurnContext): ToolCtx {
+  return {
+    repos, role: context.role, isPrivate: context.isPrivate,
+    isOwner: context.isOwner, userId: context.userId, conversationId: context.conversationId,
+    ownWorkstation: context.ownWorkstation,
+  };
+}
+
 // 도구 리포를 클로저로 받아 실제 SDK 턴 러너를 만든다. 매 턴 컨텍스트로
 // 인프로세스 도구(remember/recall/manage_access)와 allowedTools 를 구성한다.
 // deployTarget(Railway 조각2, 기본 local): cloud 면 owner-DM 이라도 PC 도구(파일/Bash)를 allowedToolsFor
 // 단계에서 이미 뺀다. canUseTool 에서도 이중방어로 즉시 거부한다(아래 참고).
 export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "cloud" = "local"): TurnRunner {
   return async (req) => {
-    const ctx: ToolCtx = {
-      repos, role: req.context.role, isPrivate: req.context.isPrivate,
-      isOwner: req.context.isOwner, userId: req.context.userId, conversationId: req.context.conversationId,
-    };
+    const ctx: ToolCtx = buildToolCtx(repos, req.context);
     const server = buildTools(ctx);
     const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner, deployTarget, req.context.ownWorkstation);
     // 파일/Bash 는 canUseTool(decidePathPermission) 을 반드시 거치도록 bare 사전승인 목록에서 뺀다 —

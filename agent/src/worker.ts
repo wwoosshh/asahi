@@ -52,13 +52,21 @@ async function main() {
 
   let stopped = false;
 
+  // 리뷰 #5b(MED): 이 워커는 그 user 를 전담하는 단일 인스턴스다 — 재기동 시점에 running 인 job 이
+  // 있다면 지난 프로세스가 claim 한 뒤 끝내지 못하고 죽은 것(영구 running 고아)이 확실하므로 failed
+  // 로 되돌린다. 이렇게 하면 delivered_ts 가 아직 없는 채로 남아, 봇의 배달 스윕이 사용자에게
+  // "실패했다"고 안내할 수 있다(#5a 와 맞물려 결과가 조용히 유실되지 않는다).
+  await jobs.failStaleRunning(config.workerUserId, "워커가 재시작되어 이전 작업이 유실됐어요. 다시 요청해 주세요.", Date.now());
+
   // 하트비트: 봇이 isOnline(cutoff) 으로 "이 사용자의 워커가 떠 있는지" 판단하는 근거.
+  // 리뷰 #7(LOW): 앱 시계가 아니라 DB 서버 시계로 찍는다(jobsRepo.heartbeat 참고) — 봇/워커 서버
+  // 간 시계 스큐가 온라인 판정에 새지 않게 한다.
   const heartbeatTimer = setInterval(() => {
-    void jobs.heartbeat(config.workerUserId, Date.now()).catch((err) => {
+    void jobs.heartbeat(config.workerUserId).catch((err) => {
       console.error("[worker] 하트비트 실패:", err);
     });
   }, HEARTBEAT_MS);
-  await jobs.heartbeat(config.workerUserId, Date.now()); // 기동 직후 바로 한 번(초기 오프라인 창 최소화)
+  await jobs.heartbeat(config.workerUserId); // 기동 직후 바로 한 번(초기 오프라인 창 최소화)
 
   // 폴링 루프: job 을 잡으면 바로 다음 job 을 확인하고(버스트 처리), 없으면 POLL_MS 만큼 쉰다.
   const pollLoop = async (): Promise<void> => {
