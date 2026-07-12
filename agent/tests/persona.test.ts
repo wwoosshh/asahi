@@ -144,9 +144,13 @@ describe("buildSystemPrompt — 캐릭터/관계", () => {
     expect(buildSystemPrompt({ ...GUEST, rapportStage: 2 })).toMatch(/덜 서먹|여러 번/);
   });
 
-  it("소유자 DM 능력 블록에 db 조회로 실측 응답하라는 안내가 있다", () => {
-    const p = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true });
-    expect(p).toMatch(/db_query|db_schema|조회/);
-    expect(p).toMatch(/실측|사실/);
+  it("소유자 DM(local·cloud) 능력 블록에 db_schema/db_query/runtime_info 로 실측 응답하라는 안내가 있다", () => {
+    for (const deployTarget of ["local", "cloud"] as const) {
+      const p = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true, deployTarget });
+      expect(p).toMatch(/db_schema/);
+      expect(p).toMatch(/db_query/);
+      expect(p).toMatch(/runtime_info/);
+      expect(p).toMatch(/실측/);
+    }
   });
 });
