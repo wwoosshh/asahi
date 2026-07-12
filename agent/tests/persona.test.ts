@@ -98,3 +98,41 @@ describe("deriveRapportStage", () => {
     expect(deriveRapportStage(1000)).toBe(2);
   });
 });
+
+describe("buildSystemPrompt — 캐릭터/관계", () => {
+  const OWNER = { role: "owner", isPrivate: true, isOwner: true } as const;
+  const GUEST = { role: "allowed", isPrivate: true, isOwner: false } as const;
+  const SERVER = { role: "allowed", isPrivate: false, isOwner: false } as const;
+
+  it("모든 컨텍스트에 Asahi 정체성과 불가침 규칙(미성년 선긋기)을 포함한다", () => {
+    for (const ctx of [OWNER, GUEST, SERVER]) {
+      const p = buildSystemPrompt(ctx);
+      expect(p).toMatch(/Asahi/);
+      expect(p).toMatch(/미성년/);
+      expect(p).toMatch(/연애/);
+    }
+  });
+
+  it("소유자 DM 은 반말 말투 지시를 포함한다", () => {
+    expect(buildSystemPrompt(OWNER)).toMatch(/반말/);
+  });
+
+  it("소유자 친근도 0(기본)은 '서먹', 2는 '편한'/'먼저' 다정 문구로 바뀐다", () => {
+    const s0 = buildSystemPrompt(OWNER);
+    expect(s0).toMatch(/서먹/);
+    const s2 = buildSystemPrompt({ ...OWNER, rapportStage: 2 });
+    expect(s2).toMatch(/편한|먼저/);
+    expect(s2).not.toMatch(/아직 서먹/);
+  });
+
+  it("손님 DM 은 낮은 존댓말·거리감 지시를 포함한다", () => {
+    const p = buildSystemPrompt(GUEST);
+    expect(p).toMatch(/존댓말/);
+    expect(p).toMatch(/거리/);
+  });
+
+  it("서버 공개 채널은 건조·공적 지시를 포함한다", () => {
+    const p = buildSystemPrompt(SERVER);
+    expect(p).toMatch(/공개 채널|건조|공적/);
+  });
+});
