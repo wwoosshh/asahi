@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt } from "../src/core/persona.js";
+import { buildSystemPrompt, deriveRapportStage } from "../src/core/persona.js";
 
 describe("buildSystemPrompt", () => {
   it("이모지·이모티콘 사용 금지 지침을 항상 포함한다", () => {
@@ -81,5 +81,20 @@ describe("buildSystemPrompt — deployTarget(§Railway 조각2)", () => {
     const serverLocal = buildSystemPrompt({ role: "allowed", isPrivate: false, isOwner: false, deployTarget: "local" });
     const serverCloud = buildSystemPrompt({ role: "allowed", isPrivate: false, isOwner: false, deployTarget: "cloud" });
     expect(serverLocal).toBe(serverCloud);
+  });
+});
+
+describe("deriveRapportStage", () => {
+  it("10 미만이면 0(서먹)", () => {
+    expect(deriveRapportStage(0)).toBe(0);
+    expect(deriveRapportStage(9)).toBe(0);
+  });
+  it("10~49면 1(보통)", () => {
+    expect(deriveRapportStage(10)).toBe(1);
+    expect(deriveRapportStage(49)).toBe(1);
+  });
+  it("50 이상이면 2(편함)", () => {
+    expect(deriveRapportStage(50)).toBe(2);
+    expect(deriveRapportStage(1000)).toBe(2);
   });
 });

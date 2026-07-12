@@ -8,6 +8,18 @@ export type PersonaContext = {
   deployTarget?: "local" | "cloud";
 };
 
+// 친근도 단계 경계(초기 추정치, 튜닝 가능).
+const RAPPORT_STAGE1_MIN = 10;
+const RAPPORT_STAGE2_MIN = 50;
+
+// 그 사용자와 누적 대화(user 메시지) 수 → 친근도 3단계. 다정함의 농도만 조절하고
+// 성격·말투 register 는 바꾸지 않는다. 소유자도 messages 에 기록되므로 동일 적용.
+export function deriveRapportStage(userMessageCount: number): 0 | 1 | 2 {
+  if (userMessageCount >= RAPPORT_STAGE2_MIN) return 2;
+  if (userMessageCount >= RAPPORT_STAGE1_MIN) return 1;
+  return 0;
+}
+
 // 턴별 컨텍스트(역할·DM여부)로 시스템 프롬프트를 만든다. 능력 계층(§7.1)을 페르소나에도 반영한다.
 export function buildSystemPrompt(ctx: PersonaContext): string {
   const base = `당신은 사용자의 PC에 상주하는 개인 AI 비서입니다. 유능하고 친근한 매니저처럼 행동하세요.
