@@ -44,6 +44,22 @@ describe("MessagesRepo", () => {
   });
 });
 
+describe("MessagesRepo.countUserMessages", () => {
+  let repo: MessagesRepo;
+  beforeEach(async () => { repo = new MessagesRepo(await openTestDb()); });
+
+  it("그 사용자의 user 역할 메시지만 센다(assistant·다른 사용자는 제외)", async () => {
+    await repo.insert({ conversationId: 1, ts: 1, role: "user", userId: "u1", content: "a" });
+    await repo.insert({ conversationId: 1, ts: 2, role: "user", userId: "u1", content: "b" });
+    await repo.insert({ conversationId: 1, ts: 3, role: "assistant", userId: "u1", content: "c" });
+    await repo.insert({ conversationId: 1, ts: 4, role: "user", userId: "u2", content: "d" });
+
+    expect(await repo.countUserMessages("u1")).toBe(2);
+    expect(await repo.countUserMessages("u2")).toBe(1);
+    expect(await repo.countUserMessages("nobody")).toBe(0);
+  });
+});
+
 describe("SummariesRepo", () => {
   it("대화별 요약을 최신순으로 준다", async () => {
     const repo = new SummariesRepo(await openTestDb());

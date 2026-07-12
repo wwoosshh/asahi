@@ -125,7 +125,7 @@ export type PersonaContext = {
 ### 5.3 core 배선
 - core가 턴 시작 시 그 사용자의 rapportStage를 계산한다: `messagesRepo.countUserMessages(userId)` → 구간 매핑 헬퍼 `deriveRapportStage(count)`.
 - 계산한 stage를 `PersonaContext`에 실어 `buildSystemPrompt` 호출.
-- 성능: 카운트 쿼리는 인덱스로 가볍지만, 매 턴 1회로 충분(캐싱은 YAGNI). 필요 시 후속 최적화.
+- 성능: 카운트 쿼리는 `idx_messages_user(user_id, role)` 인덱스로 커버되어 가볍고, 매 턴 1회로 충분(캐싱은 YAGNI). 필요 시 후속 최적화.
 
 ## 6. 데이터 영향
 - **새 스키마 없음.** 친근도는 기존 `messages`에서 파생.

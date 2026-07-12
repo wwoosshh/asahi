@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, id);
 CREATE INDEX IF NOT EXISTS idx_messages_unprocessed ON messages(processed) WHERE processed = FALSE;
+-- 리뷰(Finding 1): countUserMessages(rapportStage 파생용, 매 턴 실행)가 user_id+role 로 필터하는데
+-- 인덱스가 없어 풀스캔이었다. partial index(WHERE role='user')는 pg-mem 파싱 위험이 있어
+-- 복합 인덱스로 둔다 — 이 쿼리(WHERE user_id=$1 AND role='user')를 그대로 커버한다.
+CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id, role);
 
 CREATE TABLE IF NOT EXISTS memories (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
