@@ -1,4 +1,10 @@
+---
+lastReviewed: 2026-07-13
+---
+
 # PM2 관리 명령어 (asahi-assistant)
+
+> **⚠️ 이 흐름은 로컬/폴백용입니다.** 24/7 상시 구동은 이제 Railway(클라우드)입니다 — `deploy/railway-셋업.md` 참고. 디스코드 봇 토큰은 하나뿐이므로, **로컬 PM2로 띄우려면 Railway 배포를 먼저 정지**해야 합니다(동시 실행 시 게이트웨이 세션 충돌).
 
 - **프로세스 이름:** `asahi-assistant`
 - **설정 파일:** `deploy/ecosystem.config.cjs` (script=`dist/index.js`, cwd=`agent/`, autorestart, max_restarts 50, restart_delay 5s)
@@ -38,7 +44,25 @@ pm2 restart asahi-assistant                 # 재시작
 pm2 delete asahi-assistant                  # 프로세스 목록에서 제거
 ```
 
-## 부팅 자동시작 관리
+## 로그 관리
+
+```powershell
+pm2 flush asahi-assistant             # 로그 파일 비우기(용량 관리)
+pm2 reloadLogs                        # 로그 파일 핸들 재오픈
+```
+
+로그 파일 위치: `%USERPROFILE%\.pm2\logs\asahi-assistant-out.log` / `asahi-assistant-error.log`
+
+## 부팅 자동시작 + 절전 방지(로컬 전용)
+
+PM2/자동시작 도구가 전역 설치돼 있지 않은 새 PC라면 먼저:
+
+```powershell
+npm install -g pm2
+npm install -g pm2-windows-startup
+```
+
+부팅 시 자동시작 등록·관리:
 
 ```powershell
 pm2 save                              # 현재 실행 목록을 부팅 복원용으로 저장 ★
@@ -49,16 +73,7 @@ pm2-startup uninstall                 # 자동시작 해제
 
 > **중요:** `start`/`delete`로 프로세스 목록을 바꾼 뒤에는 반드시 `pm2 save`를 다시 할 것. 안 하면 재부팅 시 예전 목록으로 복원된다. 단순 `restart`만 했다면 save 불필요.
 
-## 로그 관리
-
-```powershell
-pm2 flush asahi-assistant             # 로그 파일 비우기(용량 관리)
-pm2 reloadLogs                        # 로그 파일 핸들 재오픈
-```
-
-로그 파일 위치: `%USERPROFILE%\.pm2\logs\asahi-assistant-out.log` / `asahi-assistant-error.log`
-
-## 상시구동(절전 방지) 확인 — 전원 연결 기준
+절전 방지 확인(전원 연결 기준 — 로컬 PC를 상시 켜둘 때만 해당, Railway 배포에는 무관):
 
 ```powershell
 powercfg /query SCHEME_CURRENT SUB_SLEEP           # 현재 절전 설정 확인
