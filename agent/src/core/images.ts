@@ -4,15 +4,15 @@ export type ImageRef = { url: string; mediaType: string; name: string; size: num
 export type ImageInput = { mediaType: string; base64: string; name: string };
 type RawAttachment = { url: string; contentType: string | null; name: string; size: number };
 
-export const IMAGE_LIMITS = {
+export const IMAGE_LIMITS = Object.freeze({
   maxCount: 4,
   maxBytes: 5 * 1024 * 1024,
-  allowed: ["image/png", "image/jpeg", "image/gif", "image/webp"],
-};
+  allowed: Object.freeze(["image/png", "image/jpeg", "image/gif", "image/webp"] as const),
+} as const);
 
 export function filterImageAttachments(
   atts: RawAttachment[],
-  limits: { maxCount: number; maxBytes: number; allowed: string[] } = IMAGE_LIMITS,
+  limits: { maxCount: number; maxBytes: number; allowed: readonly string[] } = IMAGE_LIMITS,
 ): { images: ImageRef[]; skipped: string[] } {
   const images: ImageRef[] = [];
   const skipped: string[] = [];

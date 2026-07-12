@@ -693,6 +693,22 @@ describe("AgentCore — 이미지 입력", () => {
     expect(recent.some((m) => m.role === "user" && m.content.includes("[이미지 1장: a.png]"))).toBe(true);
   });
 
+  it("이미지 다운로드가 전부 실패하면 system_notice 로 안내하되, 턴은 텍스트만으로 계속 진행된다", async () => {
+    const failFetch = (async () => ({ ok: false }) as Response) as unknown as typeof fetch;
+    const t = await setup({ imageFetch: failFetch });
+    const hint = dmHint("owner", "owner");
+    t.bus.publish({ type: "user_message", channel: "discord", channelRef: hint.discordChannelId, text: "이게 뭐야", ts: 1, hint,
+      images: [{ url: "u", mediaType: "image/png", name: "a.png", size: 3 }] });
+    await t.core.drain();
+    // 턴은 여전히 실행됨(텍스트만으로라도 답함)
+    expect(t.calls).toHaveLength(1);
+    expect(t.calls[0].images).toHaveLength(0); // 다운로드 실패로 이미지 없이 전달
+    // 사용자에게 실패를 안내
+    const notice = t.published.find((e) => e.type === "system_notice" && e.text.includes("불러오지"));
+    expect(notice).toBeDefined();
+    expect(notice?.channelRef).toBe("dm-owner");
+  });
+
   it("이미지가 있으면 워커가 온라인이어도 위임하지 않고 봇이 직접 처리한다", async () => {
     // 주의(브리프 명시): jobs.isOnline 은 DB 서버 시계 기준이라 pg-mem 환경에서 heartbeat 직후
     // 온라인 판정이 확실히 성립하는지 보장되지 않는다(실 Postgres 확인 필요). 그래도 핵심 단언인

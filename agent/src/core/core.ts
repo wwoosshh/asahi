@@ -13,7 +13,7 @@ import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { TurnsRepo } from "../store/turnsRepo.js";
 import type { JobsRepo } from "../store/jobsRepo.js";
 import { buildContextBlock, isSessionNotFound } from "./turnPrep.js";
-import { buildImageMarker, downloadImages, type ImageRef } from "./images.js";
+import { buildImageMarker, downloadImages, type ImageRef, type ImageInput } from "./images.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -254,7 +254,16 @@ export class AgentCore {
 
       // 이 턴에만 쓰는 이미지 다운로드(§6: DB엔 마커만 저장했으므로, 과거 이미지 재주입은 없다 —
       // 여기서 받는 images 는 이번 턴의 것뿐이다. 크래시복구 재개 시엔 images=[] 로 들어온다).
-      const imageInputs = images.length > 0 ? (await downloadImages(images, { fetchImpl: this.fetchImpl })).inputs : [];
+      // §8: 다운로드가 전부/일부 실패하면 모델이 이미지를 못 보고 텍스트만 받아 오답/환각할 수
+      // 있으므로, 사용자에게 안내한다(턴 자체는 계속 진행 — 텍스트만으로라도 답한다).
+      let imageInputs: ImageInput[] = [];
+      if (images.length > 0) {
+        const dl = await downloadImages(images, { fetchImpl: this.fetchImpl });
+        imageInputs = dl.inputs;
+        if (dl.failed.length > 0) {
+          this.bus.publish({ type: "system_notice", channel: "discord", channelRef: conv.discordChannelId, text: `이미지 ${dl.failed.length}장을 불러오지 못했어요.`, ts: this.now() });
+        }
+      }
 
       let result: TurnResult;
       try {
