@@ -38,4 +38,10 @@ npm run build
 pm2 start ../deploy/ecosystem.config.cjs
 ```
 
-자세한 설계·로드맵은 [docs/](docs/) 참고. 현재 단계: **1단계 (코어 + SQLite/메모리 + 디스코드 봇 + PM2)**.
+PM2 운영 명령어는 [deploy/PM2-명령어.md](deploy/PM2-명령어.md) 참고.
+
+## 다른 PC에서 운영
+
+이 PC가 꺼져 있어도 다른 PC에서 봇을 띄울 수 있다. 절차와 주의사항(**봇은 한 번에 한 PC만**, 기억 `data/`는 각 PC 로컬이라 수동 이전, `.env`는 새 PC에서 준비)은 [deploy/다른-PC-셋업.md](deploy/다른-PC-셋업.md) 참고.
+
+자세한 설계·로드맵은 [docs/](docs/) 참고. 현재 단계: **멀티유저 런타임(2A/2B) + 실시간 진행 UI + 소유자 원격 개발(Phase A: 허용 폴더 내 파일·셸)**.
