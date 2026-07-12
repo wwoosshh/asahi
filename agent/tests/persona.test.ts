@@ -135,4 +135,12 @@ describe("buildSystemPrompt — 캐릭터/관계", () => {
     const p = buildSystemPrompt(SERVER);
     expect(p).toMatch(/공개 채널|건조|공적/);
   });
+
+  it("소유자 친근도 1(익숙)은 '익숙' 다정 문구를 포함한다", () => {
+    expect(buildSystemPrompt({ ...OWNER, rapportStage: 1 })).toMatch(/익숙/);
+  });
+
+  it("손님 친근도 2는 '덜 서먹'/'여러 번' 다정 문구를 포함한다", () => {
+    expect(buildSystemPrompt({ ...GUEST, rapportStage: 2 })).toMatch(/덜 서먹|여러 번/);
+  });
 });
