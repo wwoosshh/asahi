@@ -25,6 +25,7 @@ const flush = async () => {
 async function setup(over: {
   config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" | "resume-fails";
   sleep?: (ms: number) => Promise<void>; workerPollMs?: number; workerTimeoutMs?: number;
+  imageFetch?: typeof fetch;
 } = {}) {
   const db = await openTestDb();
   const repos = {
@@ -65,6 +66,7 @@ async function setup(over: {
   const core = new AgentCore({
     bus, config, runTurn, now: () => clock, repos, agentCwd: "/data/agent",
     sleep: over.sleep ?? defaultSleep, workerPollMs: over.workerPollMs, workerTimeoutMs: over.workerTimeoutMs,
+    fetchImpl: over.imageFetch,
   });
   core.start();
   const published: AgentEvent[] = [];
@@ -670,5 +672,40 @@ describe("AgentCore — DM 세션 예약어(/새세션)", () => {
     expect(await t.repos.messages.countUserMessages("owner")).toBe(msgCountBefore); // 명령어는 기록되지 않았다
     const notices = t.published.filter((p) => p.type === "assistant_message");
     expect(notices.some((n) => /새 세션|세션.*시작|새로/.test((n as { text: string }).text))).toBe(true);
+  });
+});
+
+describe("AgentCore — 이미지 입력", () => {
+  const fakeFetch = (async () => ({ ok: true, arrayBuffer: async () => new TextEncoder().encode("img").buffer }) as Response) as unknown as typeof fetch;
+
+  it("이미지 메시지는 마커로 저장되고, 다운로드된 이미지가 runTurn 에 전달된다", async () => {
+    const t = await setup({ imageFetch: fakeFetch });
+    const hint = dmHint("owner", "owner");
+    t.bus.publish({ type: "user_message", channel: "discord", channelRef: hint.discordChannelId, text: "이게 뭐야", ts: 1, hint,
+      images: [{ url: "u", mediaType: "image/png", name: "a.png", size: 3 }] });
+    await t.core.drain();
+    // runTurn 에 이미지 전달
+    expect(t.calls[0].images).toHaveLength(1);
+    expect(t.calls[0].images[0].base64).toBe(Buffer.from("img").toString("base64"));
+    // 저장은 마커
+    const conv = await t.repos.conversations.getByChannelId("dm-owner");
+    const recent = await t.repos.messages.recent(conv!.id, 5);
+    expect(recent.some((m) => m.role === "user" && m.content.includes("[이미지 1장: a.png]"))).toBe(true);
+  });
+
+  it("이미지가 있으면 워커가 온라인이어도 위임하지 않고 봇이 직접 처리한다", async () => {
+    // 주의(브리프 명시): jobs.isOnline 은 DB 서버 시계 기준이라 pg-mem 환경에서 heartbeat 직후
+    // 온라인 판정이 확실히 성립하는지 보장되지 않는다(실 Postgres 확인 필요). 그래도 핵심 단언인
+    // "위임 job 이 없다(claimNext null)" + "calls===1(봇이 직접 처리)"은 온라인 판정 여부와 무관하게
+    // 이미지 턴이 위임 게이트(images.length===0 조건)에서 걸러졌음을 검증한다.
+    const t = await setup({ imageFetch: fakeFetch });
+    await t.repos.jobs.heartbeat("owner"); // 워커 온라인으로
+    const hint = dmHint("owner", "owner");
+    t.bus.publish({ type: "user_message", channel: "discord", channelRef: hint.discordChannelId, text: "봐줘", ts: 1, hint,
+      images: [{ url: "u", mediaType: "image/png", name: "a.png", size: 3 }] });
+    await t.core.drain();
+    expect(t.calls).toHaveLength(1); // 위임(enqueue) 아니라 직접 runTurn
+    const pending = await t.repos.jobs.claimNext("owner", 999999);
+    expect(pending).toBeNull(); // 위임된 job 없음
   });
 });

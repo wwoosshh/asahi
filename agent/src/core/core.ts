@@ -13,6 +13,7 @@ import type { MemoriesRepo } from "../store/memoriesRepo.js";
 import type { TurnsRepo } from "../store/turnsRepo.js";
 import type { JobsRepo } from "../store/jobsRepo.js";
 import { buildContextBlock, isSessionNotFound } from "./turnPrep.js";
+import { buildImageMarker, downloadImages, type ImageRef } from "./images.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -80,10 +81,11 @@ export class AgentCore {
   private sleep: (ms: number) => Promise<void>;
   private workerPollMs: number;
   private workerTimeoutMs: number;
+  private fetchImpl: typeof fetch;
 
   constructor(deps: {
     bus: EventBus; config: Config; runTurn: TurnRunner; repos: CoreRepos; agentCwd: string; now?: () => number;
-    sleep?: (ms: number) => Promise<void>; workerPollMs?: number; workerTimeoutMs?: number;
+    sleep?: (ms: number) => Promise<void>; workerPollMs?: number; workerTimeoutMs?: number; fetchImpl?: typeof fetch;
   }) {
     this.bus = deps.bus;
     this.config = deps.config;
@@ -95,6 +97,7 @@ export class AgentCore {
     this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.workerPollMs = deps.workerPollMs ?? WORKER_POLL_MS;
     this.workerTimeoutMs = deps.workerTimeoutMs ?? WORKER_TIMEOUT_MS;
+    this.fetchImpl = deps.fetchImpl ?? fetch;
   }
 
   start(): void {
@@ -115,12 +118,12 @@ export class AgentCore {
     // 메시지부터 직렬화하려면 힌트에서 즉시 알 수 있는 discordChannelId 를 큐 키로 써야 한다 —
     // 그러지 않으면 같은 채널의 두 메시지가 동시에 도착했을 때 resolveConversation 이 서로의
     // 결과를 보지 못하고 대화 행을 중복 생성하거나(멱등 깨짐) 메시지 저장 순서가 뒤바뀔 수 있다.
-    this.enqueue(this.ingestChains, hint.discordChannelId, () => this.ingest(hint, e.ts, e.text));
+    this.enqueue(this.ingestChains, hint.discordChannelId, () => this.ingest(hint, e.ts, e.text, e.images ?? []));
   }
 
   // durable 저장만 담당(짧다) — 크래시 복구 불변식: 이 함수가 끝나면 메시지는 반드시
   // processed=false 로 DB 에 있다. 뒤이은 LLM 턴은 turnChains 로 넘겨 별도로 직렬화한다.
-  private async ingest(hint: ConversationHint, ts: number, text: string): Promise<void> {
+  private async ingest(hint: ConversationHint, ts: number, text: string, images: ImageRef[]): Promise<void> {
     const conv = await this.resolveConversation(hint, ts);
 
     // 예약어 세션 명령(/새세션 등): LLM 턴·메시지 저장 없이 세션만 리셋하고 확인을 보낸다.
@@ -134,11 +137,12 @@ export class AgentCore {
 
     await this.repos.participants.upsert(conv.id, hint.userId, ts);
     // 미처리(processed=false)로 먼저 저장 → 크래시로 죽어도 부팅 시 recoverPending 이 재개한다.
+    // 저장 content는 마커(§6: 과거 이미지 재주입 없음 — 이미지 자체는 저장하지 않고 몇 장/이름만 남긴다).
     const messageId = await this.repos.messages.insert({
       conversationId: conv.id, ts, role: "user", userId: hint.userId,
-      discordMessageId: hint.discordMessageId, content: text, processed: false,
+      discordMessageId: hint.discordMessageId, content: buildImageMarker(text, images), processed: false,
     });
-    this.enqueue(this.turnChains, hint.discordChannelId, () => this.runConversationTurn(conv.id, hint.userId, hint.role as "owner" | "allowed", text, messageId));
+    this.enqueue(this.turnChains, hint.discordChannelId, () => this.runConversationTurn(conv.id, hint.userId, hint.role as "owner" | "allowed", text, messageId, images));
   }
 
   // 힌트로 대화 행을 확정한다(멱등: discord_channel_id → origin_message_id → 생성).
@@ -190,7 +194,7 @@ export class AgentCore {
     }
   }
 
-  private async runConversationTurn(convId: number, userId: string, role: "owner" | "allowed", text: string, messageId: number): Promise<void> {
+  private async runConversationTurn(convId: number, userId: string, role: "owner" | "allowed", text: string, messageId: number, images: ImageRef[] = []): Promise<void> {
     try {
       const conv = await this.repos.conversations.getById(convId);
       if (!conv) return;
@@ -220,7 +224,9 @@ export class AgentCore {
       // 탈취할 수 있다. 인증 인프라(WORKER_SECRET 검증·RLS)가 갖춰지기 전까지 워커는 소유자 전용
       // 정책으로 제한한다 — 손님 DM 은 워커가 온라인이어도 이 봇이 기존(cloud 도구셋)대로 처리한다.
       // 한도 예약은 이미 위에서 끝났으므로, 위임/로컬 어느 경로든 손님 한도가 동일하게 걸린다.
-      if (isOwner && conv.isPrivate && await this.repos.jobs.isOnline(userId, WORKER_ONLINE_CUTOFF_MS)) {
+      // 이미지가 있는 턴은 위임하지 않는다(§7: 워커 경로는 아직 멀티모달을 다루지 않으므로, 이미지가
+      // 있으면 이 봇이 직접 처리해 모델이 이미지를 보게 한다).
+      if (images.length === 0 && isOwner && conv.isPrivate && await this.repos.jobs.isOnline(userId, WORKER_ONLINE_CUTOFF_MS)) {
         await this.delegateToWorker(conv, userId, text, messageId);
         return;
       }
@@ -246,9 +252,13 @@ export class AgentCore {
         this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
       };
 
+      // 이 턴에만 쓰는 이미지 다운로드(§6: DB엔 마커만 저장했으므로, 과거 이미지 재주입은 없다 —
+      // 여기서 받는 images 는 이번 턴의 것뿐이다. 크래시복구 재개 시엔 images=[] 로 들어온다).
+      const imageInputs = images.length > 0 ? (await downloadImages(images, { fetchImpl: this.fetchImpl })).inputs : [];
+
       let result: TurnResult;
       try {
-        result = await this.runTurn({ prompt, systemPrompt, resume, cwd: this.agentCwd, context, onProgress });
+        result = await this.runTurn({ prompt, systemPrompt, resume, cwd: this.agentCwd, context, onProgress, images: imageInputs });
       } catch (err) {
         if (resume && isSessionNotFound(err)) {
           // resume 세션이 SDK 쪽에 없음(클라우드 컨테이너 재배포/재시작으로 세션 저장소가 초기화됨 등)
@@ -261,7 +271,7 @@ export class AgentCore {
           if (conv.isPrivate && conv.primaryUserId === this.ownerId) {
             await this.repos.conversations.setPrivateMemoryLoaded(conv.id, true);
           }
-          result = await this.runTurn({ prompt: retryPrompt, systemPrompt, resume: undefined, cwd: this.agentCwd, context, onProgress });
+          result = await this.runTurn({ prompt: retryPrompt, systemPrompt, resume: undefined, cwd: this.agentCwd, context, onProgress, images: imageInputs });
         } else {
           throw err;
         }
