@@ -2,6 +2,7 @@ import type { EventBus, UserMessageEvent, ConversationHint } from "../events/bus
 import type { Config } from "../config.js";
 import type { TurnRunner, TurnContext, TurnResult, ProgressUpdate } from "./agent.js";
 import { buildSystemPrompt, deriveRapportStage } from "./persona.js";
+import { parseSessionCommand } from "./commands.js";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { ConversationsRepo, Conversation } from "../store/conversationsRepo.js";
@@ -121,6 +122,16 @@ export class AgentCore {
   // processed=false 로 DB 에 있다. 뒤이은 LLM 턴은 turnChains 로 넘겨 별도로 직렬화한다.
   private async ingest(hint: ConversationHint, ts: number, text: string): Promise<void> {
     const conv = await this.resolveConversation(hint, ts);
+
+    // 예약어 세션 명령(/새세션 등): LLM 턴·메시지 저장 없이 세션만 리셋하고 확인을 보낸다.
+    // 활발한 DM 이 같은 SDK 세션을 계속 resume 해 페르소나 변경이 반영되지 않는 걸, 소유자가
+    // 직접 끊고 새 세션을 시작하는 용도(새 세션은 buildContextBlock 의 흉내-방지 안내로 캐릭터가 적용된다).
+    if (parseSessionCommand(text) === "reset") {
+      await this.repos.conversations.setSession(conv.id, null, ts);
+      this.bus.publish({ type: "assistant_message", channel: "discord", channelRef: conv.discordChannelId, text: "…알겠어. 새 세션으로 시작할게. 다음 메시지부터 새로 대화하자.", ts: this.now() });
+      return;
+    }
+
     await this.repos.participants.upsert(conv.id, hint.userId, ts);
     // 미처리(processed=false)로 먼저 저장 → 크래시로 죽어도 부팅 시 recoverPending 이 재개한다.
     const messageId = await this.repos.messages.insert({

@@ -648,3 +648,27 @@ describe("AgentCore — 친근도(rapportStage) 주입", () => {
     expect(t.calls[1].systemPrompt).toMatch(/익숙/);
   });
 });
+
+describe("AgentCore — DM 세션 예약어(/새세션)", () => {
+  it("예약어를 받으면 세션을 리셋하고 확인만 보내며, LLM 턴·메시지 저장을 하지 않는다", async () => {
+    const t = await setup();
+    // 먼저 일반 대화로 세션을 하나 만든다(nextResult.sessionId = 's1').
+    pub(t.bus, dmHint("owner", "owner"), "안녕", 1);
+    await t.core.drain();
+    expect(t.calls).toHaveLength(1);
+    const before = await t.repos.conversations.getByChannelId("dm-owner");
+    expect(before?.sessionId).toBe("s1");
+    const msgCountBefore = await t.repos.messages.countUserMessages("owner");
+
+    // 예약어 전송 → 세션 리셋 + 확인, 새 턴/저장 없음.
+    pub(t.bus, dmHint("owner", "owner"), "/새세션", 2);
+    await t.core.drain();
+
+    expect(t.calls).toHaveLength(1); // 새 LLM 턴이 돌지 않았다
+    const after = await t.repos.conversations.getByChannelId("dm-owner");
+    expect(after?.sessionId).toBeNull(); // 세션이 리셋됐다
+    expect(await t.repos.messages.countUserMessages("owner")).toBe(msgCountBefore); // 명령어는 기록되지 않았다
+    const notices = t.published.filter((p) => p.type === "assistant_message");
+    expect(notices.some((n) => /새 세션|세션.*시작|새로/.test((n as { text: string }).text))).toBe(true);
+  });
+});
