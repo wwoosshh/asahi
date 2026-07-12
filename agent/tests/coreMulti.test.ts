@@ -630,3 +630,21 @@ describe("AgentCore — 위임 결과 배달 스윕(리뷰 #5a: 타임아웃 후
     expect(t.published.filter((e) => e.type === "assistant_message")).toHaveLength(1); // 스윕이 중복 발행 안 함
   });
 });
+
+describe("AgentCore — 친근도(rapportStage) 주입", () => {
+  it("누적 user 메시지가 적으면 소유자 프롬프트에 '서먹', 10개 이상이면 '익숙' 문구가 담긴다", async () => {
+    const t = await setup();
+    // 첫 대화: 이번 메시지 1개만 카운트 → stage 0(서먹)
+    pub(t.bus, dmHint("owner", "owner"), "안녕", 1);
+    await t.core.drain();
+    expect(t.calls[0].systemPrompt).toMatch(/서먹/);
+
+    // owner user 메시지를 9개 추가로 심어 다음 턴의 카운트를 10으로 만든다(9 + 이번 1 = 10)
+    for (let i = 0; i < 9; i++) {
+      await t.repos.messages.insert({ conversationId: 1, ts: 10 + i, role: "user", userId: "owner", content: `m${i}` });
+    }
+    pub(t.bus, dmHint("owner", "owner"), "또 안녕", 100);
+    await t.core.drain();
+    expect(t.calls[1].systemPrompt).toMatch(/익숙/);
+  });
+});

@@ -1,7 +1,7 @@
 import type { EventBus, UserMessageEvent, ConversationHint } from "../events/bus.js";
 import type { Config } from "../config.js";
 import type { TurnRunner, TurnContext, TurnResult, ProgressUpdate } from "./agent.js";
-import { buildSystemPrompt } from "./persona.js";
+import { buildSystemPrompt, deriveRapportStage } from "./persona.js";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { ConversationsRepo, Conversation } from "../store/conversationsRepo.js";
@@ -229,7 +229,8 @@ export class AgentCore {
       }
 
       const context: TurnContext = { role, isPrivate: conv.isPrivate, isOwner, userId, conversationId: conv.id };
-      const systemPrompt = buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget });
+      const rapportStage = deriveRapportStage(await this.repos.messages.countUserMessages(userId));
+      const systemPrompt = buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget, rapportStage });
       const onProgress = (u: ProgressUpdate) => {
         this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
       };
