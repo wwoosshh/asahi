@@ -1,6 +1,12 @@
 import type { Role } from "../store/usersRepo.js";
 
-export type PersonaContext = { role: Role; isPrivate: boolean; isOwner: boolean };
+export type PersonaContext = {
+  role: Role;
+  isPrivate: boolean;
+  isOwner: boolean;
+  // 배포 대상(Railway 조각2). 생략 시 local(기존 동작)과 동일.
+  deployTarget?: "local" | "cloud";
+};
 
 // 턴별 컨텍스트(역할·DM여부)로 시스템 프롬프트를 만든다. 능력 계층(§7.1)을 페르소나에도 반영한다.
 export function buildSystemPrompt(ctx: PersonaContext): string {
@@ -23,9 +29,16 @@ export function buildSystemPrompt(ctx: PersonaContext): string {
 - 기억은 remember/recall 도구(데이터베이스)로 관리합니다. 파일로 저장하지 마세요.
 - 먼저 사용자에게 간결히 답하세요. 매 턴 저장/조회하지 말고, 정말 오래 기억할 가치가 있을 때만 remember 를 쓰고, 필요할 때만 recall 로 찾으세요.`;
 
+  const isCloud = ctx.deployTarget === "cloud";
+
   const capability =
     ctx.isOwner && ctx.isPrivate
-      ? `## 능력
+      ? isCloud
+        ? `## 능력
+- 소유자와의 1:1 비공개 대화입니다. 지금은 클라우드에서 실행 중이라 PC 파일·셸(Bash) 작업은 할 수 없습니다. 로컬 워커가 연결되면 그때 PC 작업이 가능해집니다. 지금 요청받으면 그렇게 안내하세요.
+- manage_access 로 접근 권한 관리는 그대로 할 수 있습니다. 소유자가 직접 지시할 때만, 디스코드 숫자 ID(@멘션)로만 실행하세요.
+- 기억(remember/recall)은 PC 와 무관하므로 평소처럼 사용하세요.`
+        : `## 능력
 - 소유자와의 1:1 비공개 대화입니다. 파일 도구로 PC 작업을 할 수 있고, manage_access 로 접근 권한을 관리할 수 있습니다.
 - manage_access 는 소유자가 직접 지시할 때만, 디스코드 숫자 ID(@멘션)로만 실행하세요.
 - 파일 도구(Read/Write/Edit/Glob/Grep)는 allow_dir 로 등록된 허용 폴더 안으로 강제 제한됩니다. 그 밖의 경로는 접근이 거부됩니다. 아직 허용된 폴더가 없다면 먼저 allow_dir 로 등록해 달라고 안내하세요.

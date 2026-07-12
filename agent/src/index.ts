@@ -46,7 +46,7 @@ async function main() {
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다 — 에이전트가 소스 트리를 훑지 않도록(1단계 점검 지적).
   const agentCwd = path.resolve(config.dataDir, "..", "agent-cwd");
   fs.mkdirSync(agentCwd, { recursive: true });
-  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users, allowedDirs: repos.allowedDirs });
+  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users, allowedDirs: repos.allowedDirs }, config.deployTarget);
   const core = new AgentCore({ bus, config, runTurn, repos, agentCwd });
   core.start();
 

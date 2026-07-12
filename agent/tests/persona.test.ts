@@ -56,3 +56,30 @@ describe("buildSystemPrompt", () => {
     expect(p).toMatch(/한국어/);
   });
 });
+
+describe("buildSystemPrompt — deployTarget(§Railway 조각2)", () => {
+  it("deployTarget 을 생략하면 local 과 동일하게(기존 owner-DM 파일 도구 안내) 동작한다", () => {
+    const withoutField = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true });
+    const withLocal = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true, deployTarget: "local" });
+    expect(withoutField).toBe(withLocal);
+    expect(withoutField).toMatch(/파일/);
+    expect(withoutField).toMatch(/manage_access/);
+  });
+
+  it("deployTarget='cloud' + owner-DM 이면 PC 파일·셸 작업 불가 + 로컬 워커 연결 안내로 바뀐다", () => {
+    const p = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true, deployTarget: "cloud" });
+    expect(p).toMatch(/클라우드/);
+    expect(p).toMatch(/로컬 워커/);
+    expect(p).toMatch(/manage_access/); // 기억·접근관리는 PC 무관하니 유지
+  });
+
+  it("deployTarget='cloud' 라도 손님 DM·서버 안내는 local 과 동일(영향 없음)", () => {
+    const guestLocal = buildSystemPrompt({ role: "allowed", isPrivate: true, isOwner: false, deployTarget: "local" });
+    const guestCloud = buildSystemPrompt({ role: "allowed", isPrivate: true, isOwner: false, deployTarget: "cloud" });
+    expect(guestLocal).toBe(guestCloud);
+
+    const serverLocal = buildSystemPrompt({ role: "allowed", isPrivate: false, isOwner: false, deployTarget: "local" });
+    const serverCloud = buildSystemPrompt({ role: "allowed", isPrivate: false, isOwner: false, deployTarget: "cloud" });
+    expect(serverLocal).toBe(serverCloud);
+  });
+});

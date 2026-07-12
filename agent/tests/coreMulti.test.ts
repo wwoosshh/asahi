@@ -33,6 +33,7 @@ async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "man
   const config: Config = {
     discordToken: "t", ownerId: "owner", databaseUrl: "postgres://test", dataDir: ":memory:", memoryDir: "x",
     sessionIdleMinutes: 30, maxTurnsPerHour: 30, maxTurnsPerHourPerUser: 20, maxTurnsPerHourGlobal: 40, ownerReserve: 10,
+    deployTarget: "local",
     ...over.config,
   };
   let clock = 1_000_000;

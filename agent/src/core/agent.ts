@@ -73,14 +73,16 @@ export function progressFromMessage(message: ProgressSourceMessage, pendingToolN
 
 // 도구 리포를 클로저로 받아 실제 SDK 턴 러너를 만든다. 매 턴 컨텍스트로
 // 인프로세스 도구(remember/recall/manage_access)와 allowedTools 를 구성한다.
-export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
+// deployTarget(Railway 조각2, 기본 local): cloud 면 owner-DM 이라도 PC 도구(파일/Bash)를 allowedToolsFor
+// 단계에서 이미 뺀다. canUseTool 에서도 이중방어로 즉시 거부한다(아래 참고).
+export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "cloud" = "local"): TurnRunner {
   return async (req) => {
     const ctx: ToolCtx = {
       repos, role: req.context.role, isPrivate: req.context.isPrivate,
       isOwner: req.context.isOwner, userId: req.context.userId, conversationId: req.context.conversationId,
     };
     const server = buildTools(ctx);
-    const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner);
+    const allowedTools = allowedToolsFor(req.context.role, req.context.isPrivate, req.context.isOwner, deployTarget);
     // 파일/Bash 는 canUseTool(decidePathPermission) 을 반드시 거치도록 bare 사전승인 목록에서 뺀다 —
     // SDK 는 allowedTools 에 괄호 없는 "이름 그대로" 항목이 있으면 canUseTool 을 아예 호출하지 않고
     // 통과시켜 버린다(경로 검사가 완전히 우회됨). mcp__asahi__* 도구는 그대로 bare 사전승인 유지.
@@ -92,6 +94,11 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
     const isOwnerDm = req.context.isOwner && req.context.isPrivate;
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
+      // cloud 이중방어: allowedToolsFor 가 이미 PC 도구를 뺐지만, 여기서도 경로 검사 이전에
+      // 즉시 거부해 어떤 경로로도(모델의 임의 도구 호출 시도 포함) 클라우드에서 PC 작업이 새지 않게 한다.
+      if (deployTarget === "cloud" && isPathGatedTool(toolName)) {
+        return { behavior: "deny", message: "클라우드 실행 중이라 PC 작업은 로컬 워커 연결 후 가능해요." };
+      }
       const allowedDirs = await repos.allowedDirs.list();
       const rawPaths = extractCandidatePaths(toolName, input, options.blockedPath, req.cwd);
       const resolvedPaths = rawPaths.map(resolveRealOrNearestAncestor);
@@ -106,7 +113,7 @@ export function makeRunAgentTurn(repos: ToolRepos): TurnRunner {
     let ok = false;
     // 턴 하나 동안 tool_use_id → 짧은 도구명(진행 이벤트용). onProgress 가 없으면 추출도 하지 않는다.
     const pendingToolNames = new Map<string, string>();
-    const additionalDirectories = isOwnerDm ? await repos.allowedDirs.list() : [];
+    const additionalDirectories = isOwnerDm && deployTarget === "local" ? await repos.allowedDirs.list() : [];
 
     for await (const message of query({
       prompt: req.prompt,

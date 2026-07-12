@@ -199,7 +199,7 @@ export class AgentCore {
       const context: TurnContext = { role, isPrivate: conv.isPrivate, isOwner, userId, conversationId: conv.id };
       const result = await this.runTurn({
         prompt,
-        systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner }),
+        systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget }),
         resume, cwd: this.agentCwd, context,
         onProgress: (u) => {
           this.bus.publish({ type: "progress", channel: "discord", channelRef: conv.discordChannelId, text: formatProgress(u), ts: this.now() });
@@ -273,7 +273,7 @@ export class AgentCore {
       const toMessageId = recentMsgs[0]?.id ?? conv.firstMessageId ?? 0;
       const result = await this.runTurn({
         prompt: SUMMARY_PROMPT,
-        systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner }),
+        systemPrompt: buildSystemPrompt({ role, isPrivate: conv.isPrivate, isOwner, deployTarget: this.config.deployTarget }),
         resume: conv.sessionId, cwd: this.agentCwd,
         context: { role, isPrivate: conv.isPrivate, isOwner, userId: conv.primaryUserId, conversationId: conv.id },
       });

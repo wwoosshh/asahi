@@ -43,6 +43,21 @@ describe("loadConfig", () => {
     expect(c.maxTurnsPerHour).toBe(5);
   });
 
+  it("deployTarget 기본값은 local 이다", () => {
+    const c = loadConfig(base);
+    expect(c.deployTarget).toBe("local");
+  });
+
+  it("DEPLOY_TARGET=cloud 이면 deployTarget 이 cloud 로 로드된다", () => {
+    const c = loadConfig({ ...base, DEPLOY_TARGET: "cloud" });
+    expect(c.deployTarget).toBe("cloud");
+  });
+
+  it("DEPLOY_TARGET 이 cloud 가 아닌 값(오타 등)이면 local 로 취급한다", () => {
+    const c = loadConfig({ ...base, DEPLOY_TARGET: "production" });
+    expect(c.deployTarget).toBe("local");
+  });
+
   it("필수값이 없으면 무엇이 빠졌는지 알려주며 실패한다", () => {
     expect(() => loadConfig({})).toThrow(/DISCORD_TOKEN/);
   });

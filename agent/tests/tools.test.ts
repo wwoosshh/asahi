@@ -205,4 +205,31 @@ describe("allowedToolsFor — 능력 계층(§7.1)", () => {
     expect(allowedToolsFor("owner", false, false)).toEqual(["mcp__asahi__recall"]);
     expect(allowedToolsFor("allowed", false, false)).toEqual(["mcp__asahi__recall"]);
   });
+
+  it("deployTarget 을 생략하거나 'local' 로 주면 기존(로컬) 동작과 완전히 동일하다", () => {
+    expect(allowedToolsFor("owner", true, true)).toEqual(allowedToolsFor("owner", true, true, "local"));
+    expect(allowedToolsFor("allowed", true, false)).toEqual(allowedToolsFor("allowed", true, false, "local"));
+    expect(allowedToolsFor("owner", false, false)).toEqual(allowedToolsFor("owner", false, false, "local"));
+  });
+
+  it("deployTarget='cloud' + 소유자 DM 이면 PC 도구(파일·Bash·dir 관리)를 빼고 remember/recall/manage_access 만 남는다", () => {
+    const tools = allowedToolsFor("owner", true, true, "cloud");
+    expect(tools).toEqual([
+      "mcp__asahi__remember",
+      "mcp__asahi__recall",
+      "mcp__asahi__manage_access",
+    ]);
+    expect(tools).not.toContain("Read");
+    expect(tools).not.toContain("Write");
+    expect(tools).not.toContain("Bash");
+    expect(tools).not.toContain("mcp__asahi__allow_dir");
+    expect(tools).not.toContain("mcp__asahi__revoke_dir");
+    expect(tools).not.toContain("mcp__asahi__list_dirs");
+  });
+
+  it("deployTarget='cloud' 라도 손님 DM·서버는 로컬과 동일(영향 없음)", () => {
+    expect(allowedToolsFor("allowed", true, false, "cloud")).toEqual(["mcp__asahi__remember", "mcp__asahi__recall"]);
+    expect(allowedToolsFor("owner", false, false, "cloud")).toEqual(["mcp__asahi__recall"]);
+    expect(allowedToolsFor("allowed", false, false, "cloud")).toEqual(["mcp__asahi__recall"]);
+  });
 });

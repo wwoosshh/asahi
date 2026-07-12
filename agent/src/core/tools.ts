@@ -87,8 +87,18 @@ export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
 
 // ── 턴별 도구셋(능력 계층, §7.1) ────────────────────────────────────────────
 // owner-DM → 파일 도구 + Bash + 기억 + 접근관리 + 허용폴더 관리. 손님 DM → 기억(본인)만. 서버 → recall(공용)만.
-export function allowedToolsFor(role: Role, isPrivate: boolean, isOwner: boolean): string[] {
+// deployTarget="cloud"(Railway 조각2): 소유자 PC 가 없는 컨테이너 실행이므로 owner-DM 이라도 PC 도구
+// (파일/Bash/allow_dir 류)는 빼고 대화·기억·접근관리(PC 무관)만 남긴다. local(기본)은 기존과 완전히 동일.
+export function allowedToolsFor(
+  role: Role,
+  isPrivate: boolean,
+  isOwner: boolean,
+  deployTarget: "local" | "cloud" = "local",
+): string[] {
   if (isOwner && isPrivate) {
+    if (deployTarget === "cloud") {
+      return [t("remember"), t("recall"), t("manage_access")];
+    }
     return [
       ...FILE_TOOLS, "Bash",
       t("remember"), t("recall"), t("manage_access"),

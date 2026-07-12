@@ -25,6 +25,9 @@ export type Config = {
   maxTurnsPerHourPerUser: number; // 유저별 시간당 상한 (기본 20)
   maxTurnsPerHourGlobal: number;  // 전역 시간당 상한 (기본 40)
   ownerReserve: number;           // (현재 미사용) 소유자는 무제한 정책이라 예약 불필요 — 하위호환 위해 로드만 유지
+  // 배포 대상(Railway 조각2): cloud 는 소유자 PC 가 없는 컨테이너 실행을 뜻하며, PC 도구(파일/Bash)를 비활성한다.
+  // 기본은 local(기존 동작 그대로). DEPLOY_TARGET 값이 정확히 "cloud" 일 때만 cloud, 그 외(미설정·오타)는 local.
+  deployTarget: "local" | "cloud";
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -46,5 +49,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxTurnsPerHourPerUser: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR_PER_USER", 20),
     maxTurnsPerHourGlobal: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR_GLOBAL", 40),
     ownerReserve: positiveNumberEnv(env, "OWNER_RESERVE", 10),
+    deployTarget: env.DEPLOY_TARGET === "cloud" ? "cloud" : "local",
   };
 }
