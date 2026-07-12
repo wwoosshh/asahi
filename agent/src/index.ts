@@ -12,6 +12,8 @@ import { MessagesRepo } from "./store/messagesRepo.js";
 import { SummariesRepo } from "./store/summariesRepo.js";
 import { MemoriesRepo } from "./store/memoriesRepo.js";
 import { TurnsRepo } from "./store/turnsRepo.js";
+import { SettingsRepo } from "./store/settingsRepo.js";
+import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
 import { AgentCore } from "./core/core.js";
 import { makeRunAgentTurn } from "./core/agent.js";
 import { DiscordAdapter } from "./adapters/discord.js";
@@ -29,6 +31,7 @@ async function main() {
 
   const users = new UsersRepo(db);
   const conversations = new ConversationsRepo(db);
+  const allowedDirs = new AllowedDirsRepo(new SettingsRepo(db));
   const repos = {
     users,
     conversations,
@@ -37,6 +40,7 @@ async function main() {
     summaries: new SummariesRepo(db),
     memories: new MemoriesRepo(db),
     turns: new TurnsRepo(db),
+    allowedDirs,
   };
   // 소유자를 users(owner)로 보장 — 게이트 통과 기본값.
   users.upsert(config.ownerId, { role: "owner" });
@@ -45,7 +49,7 @@ async function main() {
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다 — 에이전트가 소스 트리를 훑지 않도록(1단계 점검 지적).
   const agentCwd = path.resolve(config.dataDir, "..", "agent-cwd");
   fs.mkdirSync(agentCwd, { recursive: true });
-  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users });
+  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users, allowedDirs: repos.allowedDirs });
   const core = new AgentCore({ bus, config, runTurn, repos, agentCwd });
   core.start();
 

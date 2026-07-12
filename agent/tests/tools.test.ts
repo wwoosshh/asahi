@@ -1,13 +1,22 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { openDb } from "../src/store/db.js";
 import { MemoriesRepo } from "../src/store/memoriesRepo.js";
 import { UsersRepo } from "../src/store/usersRepo.js";
-import { rememberHandler, recallHandler, manageAccessHandler, allowedToolsFor, type ToolCtx } from "../src/core/tools.js";
+import { SettingsRepo } from "../src/store/settingsRepo.js";
+import { AllowedDirsRepo } from "../src/store/allowedDirsRepo.js";
+import {
+  rememberHandler, recallHandler, manageAccessHandler,
+  allowDirHandler, revokeDirHandler, listDirsHandler,
+  allowedToolsFor, type ToolCtx,
+} from "../src/core/tools.js";
 
 function ctx(over: Partial<ToolCtx> = {}): ToolCtx {
   const db = openDb(":memory:");
   return {
-    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db) },
+    repos: { memories: new MemoriesRepo(db), users: new UsersRepo(db), allowedDirs: new AllowedDirsRepo(new SettingsRepo(db)) },
     role: "allowed", isPrivate: true, isOwner: false, userId: "guest", conversationId: 1,
     ...over,
   };
@@ -87,24 +96,91 @@ describe("manage_access 도구", () => {
   });
 });
 
+describe("allow_dir/revoke_dir/list_dir 도구(§원격개발 A2) — 소유자 DM 전용", () => {
+  it("소유자 DM 에서 실제 존재하는 디렉토리를 허용하면 list 에 반영된다", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-allowdir-"));
+    const out = allowDirHandler(owner, { path: dir });
+    expect(out).toContain(path.resolve(dir));
+    expect(owner.repos.allowedDirs.list()).toEqual([path.resolve(dir)]);
+    expect(listDirsHandler(owner)).toContain(path.resolve(dir));
+  });
+
+  it("존재하지 않는 경로는 거부하고 아무것도 추가하지 않는다", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    const bogus = path.join(os.tmpdir(), "asahi-does-not-exist-xyz");
+    const out = allowDirHandler(owner, { path: bogus });
+    expect(owner.repos.allowedDirs.list()).toEqual([]);
+    expect(out).toContain("찾을 수 없어요");
+  });
+
+  it("디렉토리가 아닌 파일 경로는 거부한다", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-allowdir-file-"));
+    const file = path.join(dir, "a.txt");
+    fs.writeFileSync(file, "x");
+    allowDirHandler(owner, { path: file });
+    expect(owner.repos.allowedDirs.list()).toEqual([]);
+  });
+
+  it("revoke_dir 은 허용 목록에서 제거한다", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-revokedir-"));
+    owner.repos.allowedDirs.add(dir);
+    const out = revokeDirHandler(owner, { path: dir });
+    expect(owner.repos.allowedDirs.list()).toEqual([]);
+    expect(out).toContain(path.resolve(dir));
+  });
+
+  it("list_dir 은 비어있으면 안내 문구를 반환한다", () => {
+    const owner = ctx({ isOwner: true, isPrivate: true });
+    expect(listDirsHandler(owner)).toContain("없어요");
+  });
+
+  it("손님 DM 에서는 세 도구 모두 거부하고 아무것도 바꾸지 않는다", () => {
+    const guest = ctx({ isOwner: false, isPrivate: true });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-guest-"));
+    expect(allowDirHandler(guest, { path: dir })).toContain("소유자");
+    expect(guest.repos.allowedDirs.list()).toEqual([]);
+    guest.repos.allowedDirs.add(dir); // 이후 상태로 revoke 시도 검증
+    expect(revokeDirHandler(guest, { path: dir })).toContain("소유자");
+    expect(guest.repos.allowedDirs.list()).toEqual([path.resolve(dir)]);
+    expect(listDirsHandler(guest)).toContain("소유자");
+  });
+
+  it("서버(비공개 아님)에서는 소유자여도 세 도구 모두 거부한다", () => {
+    const ownerServer = ctx({ isOwner: true, isPrivate: false });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "asahi-ownerserver-"));
+    expect(allowDirHandler(ownerServer, { path: dir })).toContain("소유자");
+    expect(ownerServer.repos.allowedDirs.list()).toEqual([]);
+    expect(listDirsHandler(ownerServer)).toContain("소유자");
+  });
+});
+
 describe("allowedToolsFor — 능력 계층(§7.1)", () => {
-  it("소유자 DM 은 파일 도구 + remember/recall/manage_access", () => {
+  it("소유자 DM 은 파일 도구 + remember/recall/manage_access + Bash + dir 관리 도구", () => {
     const tools = allowedToolsFor("owner", true, true);
     expect(tools).toContain("Read");
     expect(tools).toContain("Write");
     expect(tools).toContain("mcp__asahi__remember");
     expect(tools).toContain("mcp__asahi__recall");
     expect(tools).toContain("mcp__asahi__manage_access");
+    expect(tools).toContain("Bash");
+    expect(tools).toContain("mcp__asahi__allow_dir");
+    expect(tools).toContain("mcp__asahi__revoke_dir");
+    expect(tools).toContain("mcp__asahi__list_dirs");
   });
 
-  it("손님 DM 은 remember/recall 만(파일·manage_access 없음)", () => {
+  it("손님 DM 은 remember/recall 만(파일·manage_access·Bash·dir 도구 없음)", () => {
     const tools = allowedToolsFor("allowed", true, false);
     expect(tools).toEqual(["mcp__asahi__remember", "mcp__asahi__recall"]);
     expect(tools).not.toContain("Read");
+    expect(tools).not.toContain("Bash");
     expect(tools).not.toContain("mcp__asahi__manage_access");
+    expect(tools).not.toContain("mcp__asahi__allow_dir");
   });
 
-  it("서버 턴은 recall(공용)만 — 개인기억 저장·PC 도구 불가", () => {
+  it("서버 턴은 recall(공용)만 — 개인기억 저장·PC 도구·dir 도구 불가", () => {
     expect(allowedToolsFor("owner", false, false)).toEqual(["mcp__asahi__recall"]);
     expect(allowedToolsFor("allowed", false, false)).toEqual(["mcp__asahi__recall"]);
   });

@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
+import type { AllowedDirsRepo } from "../store/allowedDirsRepo.js";
 import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx } from "./tools.js";
 
 // 현재 턴의 상대·대화 컨텍스트. 이걸로 role·is_private 별 도구셋(allowedTools)을 정한다(§7.1).
@@ -15,7 +16,7 @@ export type TurnRequest = { prompt: string; systemPrompt: string; resume?: strin
 export type TurnResult = { text: string; sessionId?: string; ok: boolean };
 export type TurnRunner = (req: TurnRequest) => Promise<TurnResult>;
 
-export type ToolRepos = { memories: MemoriesRepo; users: UsersRepo };
+export type ToolRepos = { memories: MemoriesRepo; users: UsersRepo; allowedDirs: AllowedDirsRepo };
 
 // mcp__asahi__recall → recall 처럼 인프로세스 MCP 접두어를 벗겨 짧게 만든다. 접두어가 없으면 그대로.
 export function shortToolName(name: string): string {
