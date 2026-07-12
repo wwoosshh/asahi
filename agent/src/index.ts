@@ -12,6 +12,7 @@ import { SummariesRepo } from "./store/summariesRepo.js";
 import { MemoriesRepo } from "./store/memoriesRepo.js";
 import { TurnsRepo } from "./store/turnsRepo.js";
 import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
+import { JobsRepo } from "./store/jobsRepo.js";
 import { AgentCore } from "./core/core.js";
 import { makeRunAgentTurn } from "./core/agent.js";
 import { DiscordAdapter } from "./adapters/discord.js";
@@ -36,6 +37,7 @@ async function main() {
     summaries: new SummariesRepo(db),
     memories: new MemoriesRepo(db),
     turns: new TurnsRepo(db),
+    jobs: new JobsRepo(db),
     allowedDirs,
   };
   // 소유자를 users(owner)로 보장 — 게이트 통과 기본값.

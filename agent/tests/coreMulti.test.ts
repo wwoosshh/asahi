@@ -8,7 +8,8 @@ import { MessagesRepo } from "../src/store/messagesRepo.js";
 import { SummariesRepo } from "../src/store/summariesRepo.js";
 import { MemoriesRepo } from "../src/store/memoriesRepo.js";
 import { TurnsRepo } from "../src/store/turnsRepo.js";
-import { AgentCore } from "../src/core/core.js";
+import { JobsRepo } from "../src/store/jobsRepo.js";
+import { AgentCore, WORKER_ONLINE_CUTOFF_MS } from "../src/core/core.js";
 import type { Config } from "../src/config.js";
 import type { TurnRequest, TurnResult } from "../src/core/agent.js";
 
@@ -21,11 +22,15 @@ const flush = async () => {
   for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r));
 };
 
-async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" | "resume-fails" } = {}) {
+async function setup(over: {
+  config?: Partial<Config>; mode?: "immediate" | "manual" | "throw" | "resume-fails";
+  sleep?: (ms: number) => Promise<void>; workerPollMs?: number; workerTimeoutMs?: number;
+} = {}) {
   const db = await openTestDb();
   const repos = {
     users: new UsersRepo(db), conversations: new ConversationsRepo(db), participants: new ParticipantsRepo(db),
     messages: new MessagesRepo(db), summaries: new SummariesRepo(db), memories: new MemoriesRepo(db), turns: new TurnsRepo(db),
+    jobs: new JobsRepo(db),
   };
   await repos.users.upsert("owner", { role: "owner" });
   await repos.users.upsert("guest", { role: "allowed" });
@@ -54,7 +59,13 @@ async function setup(over: { config?: Partial<Config>; mode?: "immediate" | "man
     return new Promise((res) => resolvers.push(() => res(nextResult)));
   };
   const bus = new EventBus();
-  const core = new AgentCore({ bus, config, runTurn, now: () => clock, repos, agentCwd: "/data/agent" });
+  // 위임 폴링 기본 sleep: 실제 타이머 대신 가짜 시계를 poll 간격만큼 전진시키고 pg-mem 의
+  // setImmediate 단위 완료를 흘려보낸다(flush) — 테스트가 실시간 대기 없이 폴링 루프를 구동한다.
+  const defaultSleep = async (ms: number) => { clock += ms; await flush(); };
+  const core = new AgentCore({
+    bus, config, runTurn, now: () => clock, repos, agentCwd: "/data/agent",
+    sleep: over.sleep ?? defaultSleep, workerPollMs: over.workerPollMs, workerTimeoutMs: over.workerTimeoutMs,
+  });
   core.start();
   const published: AgentEvent[] = [];
   bus.subscribe("assistant_message", (e) => published.push(e));
@@ -355,5 +366,131 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     await t.core.drain();
     expect(await t.repos.summaries.recent(conv.id, 1)).toEqual(["요약2"]);
     expect((await t.repos.conversations.getById(conv.id))!.sessionId).toBeNull();
+  });
+});
+
+describe("AgentCore — 로컬 워커 위임 라우팅(하이브리드 조각3 W3)", () => {
+  it("워커가 온라인이면 DM 은 로컬 대신 job 으로 위임되고, job 이 done 이 되면 assistant_message 로 발행된다", async () => {
+    const t = await setup({
+      // 실제 워커가 하듯: 폴링 사이(sleep) 에 pending job 을 claim 해 완료시킨다.
+      sleep: async () => {
+        const job = await t.repos.jobs.claimNext("owner", t.now());
+        if (job) await t.repos.jobs.complete(job.id, "위임된 답변", t.now());
+      },
+    });
+    await t.repos.jobs.heartbeat("owner", t.now());
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    expect(t.calls.length).toBe(0); // 로컬 runTurn 은 전혀 호출되지 않음(위임됐으므로)
+    expect(t.published.find((e) => e.type === "assistant_message")).toMatchObject({ text: "위임된 답변", channelRef: "dm-owner" });
+    const jobRows = await t.db.query("SELECT * FROM worker_jobs");
+    expect(jobRows.rows.length).toBe(1); // enqueue 됨
+  });
+
+  it("손님 DM 위임도 동일하게 동작하고, 위임 경로에도 손님 시간당 한도가 적용된다(한도 초과 시 위임조차 안 됨)", async () => {
+    const t = await setup({
+      config: { maxTurnsPerHourPerUser: 1 },
+      sleep: async () => {
+        const job = await t.repos.jobs.claimNext("guest", t.now());
+        if (job) await t.repos.jobs.complete(job.id, "첫 위임 답변", t.now());
+      },
+    });
+    await t.repos.jobs.heartbeat("guest", t.now());
+    pub(t.bus, dmHint("guest", "allowed"), "1", t.now());
+    await t.core.drain();
+    expect(t.published.find((e) => e.type === "assistant_message")?.text).toBe("첫 위임 답변");
+
+    // 한도(1) 를 이미 소진 → 두 번째는 위임(enqueue)조차 하지 않고 한도 안내만 나간다.
+    pub(t.bus, dmHint("guest", "allowed"), "2", t.now());
+    await t.core.drain();
+    expect(t.published.filter((e) => e.type === "system_notice").some((e) => e.text.includes("한도"))).toBe(true);
+    const jobRows = await t.db.query("SELECT * FROM worker_jobs");
+    expect(jobRows.rows.length).toBe(1); // 두 번째는 enqueue 되지 않음
+    expect(t.calls.length).toBe(0); // 로컬 처리도 없음
+  });
+
+  it("서버/스레드 대화는 워커가 온라인이어도 위임하지 않고 기존대로 이 봇이 로컬 처리한다", async () => {
+    const t = await setup();
+    await t.repos.jobs.heartbeat("owner", t.now());
+    pub(t.bus, threadHint("owner", "ch-1", "owner", "o1"), "안녕", t.now());
+    await t.core.drain();
+
+    expect(t.calls.length).toBe(1); // 로컬 runTurn 이 호출됨
+    const jobRows = await t.db.query("SELECT * FROM worker_jobs");
+    expect(jobRows.rows.length).toBe(0); // job 은 생성되지 않음
+  });
+
+  it("워커가 오프라인(하트비트 없음)이면 DM 도 기존처럼 이 봇이 로컬 처리한다", async () => {
+    const t = await setup();
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    expect(t.calls.length).toBe(1);
+    const jobRows = await t.db.query("SELECT * FROM worker_jobs");
+    expect(jobRows.rows.length).toBe(0);
+  });
+
+  it("하트비트가 컷오프보다 오래되면(오프라인 판정) 위임하지 않고 로컬 처리한다", async () => {
+    const t = await setup();
+    await t.repos.jobs.heartbeat("owner", t.now());
+    t.setClock(t.now() + WORKER_ONLINE_CUTOFF_MS + 1); // 컷오프 초과 → offline
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    expect(t.calls.length).toBe(1);
+  });
+
+  it("job 이 진행 중 progress 를 갱신하면 progress 이벤트로 중계되고, 완료되면 assistant_message 로 마무리된다", async () => {
+    let step = 0;
+    let jobId: number | null = null;
+    const t = await setup({
+      sleep: async () => {
+        step++;
+        if (step === 1) {
+          const job = await t.repos.jobs.claimNext("owner", t.now());
+          jobId = job!.id;
+          await t.repos.jobs.setProgress(jobId, "파일 읽는 중");
+        } else if (step === 2) {
+          await t.repos.jobs.complete(jobId!, "완료된 답변", t.now());
+        }
+      },
+    });
+    await t.repos.jobs.heartbeat("owner", t.now());
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    const progressTexts = t.published.filter((e) => e.type === "progress").map((e) => e.text);
+    expect(progressTexts).toContain("파일 읽는 중");
+    expect(t.published.find((e) => e.type === "assistant_message")?.text).toBe("완료된 답변");
+  });
+
+  it("job 이 실패로 끝나면 그 오류를 안내한다", async () => {
+    const t = await setup({
+      sleep: async () => {
+        const job = await t.repos.jobs.claimNext("owner", t.now());
+        if (job) await t.repos.jobs.fail(job.id, "워커 오류 상세", t.now());
+      },
+    });
+    await t.repos.jobs.heartbeat("owner", t.now());
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    const notice = t.published.find((e) => e.type === "system_notice");
+    expect(notice?.text).toContain("워커 오류 상세");
+    expect(t.published.some((e) => e.type === "assistant_message")).toBe(false);
+  });
+
+  it("워커가 타임아웃 동안 응답하지 않으면(계속 pending) 안내 메시지를 보낸다", async () => {
+    const t = await setup({ workerPollMs: 500, workerTimeoutMs: 1500 }); // 기본 sleep: job 을 건드리지 않음(계속 pending)
+    await t.repos.jobs.heartbeat("owner", t.now());
+    pub(t.bus, dmHint("owner", "owner"), "안녕", t.now());
+    await t.core.drain();
+
+    const notice = t.published.find((e) => e.type === "system_notice");
+    expect(notice?.text).toContain("응답하지 않아요");
+    expect(t.calls.length).toBe(0); // 로컬 처리로 폴백하지 않음
+    const jobRows = await t.db.query("SELECT * FROM worker_jobs");
+    expect(jobRows.rows[0].status).toBe("pending"); // job 자체는 그대로 남겨둔다
   });
 });
