@@ -38,6 +38,24 @@ export async function openTestDb(): Promise<Db> {
     implementation: () => true,
   });
 
+  // pg-mem 은 strpos() 를 내장하지 않는다(스파이크로 확인). messagesRepo/memoriesRepo 의 검색이
+  // ILIKE '%...%' 대신 strpos(lower(x), lower(y)) > 0 를 쓰는 이유: pg-mem 의 LIKE/ILIKE 에뮬레이션은
+  // ESCAPE 절 구문 자체를 파싱하지 못하고(스파이크로 확인 — 파싱 실패), 이스케이프 없이도 검색어의
+  // %,_ 를 항상 와일드카드로 해석해버려(백슬래시 이스케이프를 전혀 이해하지 못함) 사용자가 검색어에
+  // %,_ 를 포함하면 오매칭이 난다. strpos 는 순수 부분문자열 위치 검색이라 와일드카드 해석 자체가
+  // 없어 이 문제가 애초에 발생하지 않는다. 실 Postgres 는 strpos 를 내장하므로 이 스텁은 테스트 전용.
+  mem.public.registerFunction({
+    name: "strpos",
+    args: [DataType.text, DataType.text],
+    returns: DataType.integer,
+    implementation: (haystack: string | null, needle: string | null) => {
+      if (haystack === null || needle === null) return null;
+      if (needle.length === 0) return 1;
+      const idx = haystack.indexOf(needle);
+      return idx === -1 ? 0 : idx + 1;
+    },
+  });
+
   const { Pool: MemPool } = mem.adapters.createPg();
   const pool = new MemPool() as Db;
   await initSchema(pool);

@@ -131,6 +131,13 @@ export class DiscordAdapter {
   private sendChains = new Map<string, Promise<void>>();
   // 상태 메시지 생성/편집/삭제를 채널별로 직렬화한다(진행 이벤트는 순서가 보장되므로 그대로 순서를 지켜 처리).
   private statusChains = new Map<string, Promise<void>>();
+  // 인입 메시지 처리(onMessage)를 채널별로 직렬화한다. getRole/getByChannelId 가 원격 Postgres
+  // 왕복인 async 라, 직렬화 없이 messageCreate 마다 fire-and-forget 하면 같은 채널에 빠르게
+  // 도착한 A→B 의 조회가 도착 순서와 다르게 끝날 수 있어(B 가 먼저 끝나는 경우) B 가 A 보다
+  // 먼저 bus.publish 되어 응답·저장 순서가 뒤바뀐다. message.channelId 는 await 전에 동기로
+  // 구할 수 있으므로 이를 키로 체인을 만들어 그 채널의 onMessage 호출이 도착 순서대로
+  // 완료되도록 강제한다(sendChains/statusChains 와 같은 패턴).
+  private inboundChains = new Map<string, Promise<void>>();
   private progressState = new Map<string, ProgressState>();
 
   constructor(deps: { bus: EventBus; config: Config; users: UsersRepo; conversations: ConversationsRepo }) {
@@ -151,7 +158,7 @@ export class DiscordAdapter {
 
   async start(): Promise<void> {
     this.client.on("messageCreate", (message: Message) => {
-      void this.onMessage(message).catch((err) => console.error("[discord] 메시지 처리 오류:", err));
+      this.enqueueInbound(message.channelId, () => this.onMessage(message));
     });
 
     this.bus.subscribe("progress", (e) => {
@@ -264,6 +271,13 @@ export class DiscordAdapter {
     if (!channel || channel.isDMBased() || !("messages" in channel)) throw new Error("스레드를 만들 수 없는 채널");
     const message = await channel.messages.fetch(messageId);
     return message.startThread({ name, autoArchiveDuration: ThreadAutoArchiveDuration.OneDay });
+  }
+
+  // 인입 메시지 처리를 채널별로 직렬화한다(위 inboundChains 주석 참고).
+  private enqueueInbound(channelId: string, task: () => Promise<void>): void {
+    const prev = this.inboundChains.get(channelId) ?? Promise.resolve();
+    const next = prev.then(task).catch((err) => console.error("[discord] 메시지 처리 오류:", err));
+    this.inboundChains.set(channelId, next);
   }
 
   // 상태 메시지 작업(생성/편집/삭제)을 채널별로 직렬화한다. 반환된 프라미스는 "이 작업까지 끝남"을
@@ -394,8 +408,8 @@ export class DiscordAdapter {
         state.editTimer = null;
       }
     }
-    // 종료 전, 모든 채널 체인(상태 정리 + 전송)에 남은 작업을 최대한 흘려보낸다(마지막 응답 유실 최소화).
-    await Promise.allSettled([...this.statusChains.values(), ...this.sendChains.values()]);
+    // 종료 전, 모든 채널 체인(인입 처리 + 상태 정리 + 전송)에 남은 작업을 최대한 흘려보낸다(마지막 응답 유실 최소화).
+    await Promise.allSettled([...this.inboundChains.values(), ...this.statusChains.values(), ...this.sendChains.values()]);
     await this.client.destroy();
   }
 }

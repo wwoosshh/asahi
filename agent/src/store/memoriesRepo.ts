@@ -35,13 +35,15 @@ export class MemoriesRepo {
     return (r.rows as Row[]).map(toMemory);
   }
 
-  // FTS5 대체: 제목/본문 ILIKE 부분 문자열 검색.
+  // FTS5 대체: 제목/본문 대소문자 무시 부분 문자열 검색. ILIKE '%...%' 대신
+  // strpos(lower(x), lower(y)) > 0 를 쓴다: ILIKE 는 검색어에 포함된 %,_ 를 이스케이프하지
+  // 않으면 와일드카드로 해석해 오매칭이 나는데, strpos 는 순수 위치 검색이라 그 문제 자체가
+  // 없다(이스케이프 불필요, db.ts 의 strpos 스텁 참고).
   async searchForUser(userId: string, query: string): Promise<Memory[]> {
-    const like = `%${query}%`;
     const r = await this.db.query(
       `SELECT id, user_id, scope, title, content FROM memories
-       WHERE (scope = 'shared' OR (scope = 'user' AND user_id = $1)) AND (title ILIKE $2 OR content ILIKE $2) ORDER BY id`,
-      [userId, like],
+       WHERE (scope = 'shared' OR (scope = 'user' AND user_id = $1)) AND (strpos(lower(title), lower($2)) > 0 OR strpos(lower(content), lower($2)) > 0) ORDER BY id`,
+      [userId, query],
     );
     return (r.rows as Row[]).map(toMemory);
   }

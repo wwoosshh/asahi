@@ -25,14 +25,16 @@ export class MessagesRepo {
     return (r.rows as Row[]).map(toMessage);
   }
 
-  // FTS5 대체: ILIKE 부분 문자열 검색(접두/형태소 매칭 없음, 단순 substring).
+  // FTS5 대체: 대소문자 무시 부분 문자열 검색(접두/형태소 매칭 없음, 단순 substring).
+  // ILIKE '%...%' 대신 strpos(lower(x), lower(y)) > 0 를 쓴다: ILIKE 는 검색어에 포함된 %,_ 를
+  // 이스케이프하지 않으면 와일드카드로 해석해 오매칭이 나는데, strpos 는 순수 위치 검색이라
+  // 와일드카드 해석 자체가 없어 그 문제가 애초에 없다(이스케이프 불필요, db.ts 의 strpos 스텁 참고).
   async search(conversationId: number | null, query: string, limit: number): Promise<StoredMessage[]> {
     const trimmed = query.trim();
     if (trimmed.length === 0) return [];
-    const like = `%${trimmed}%`;
     const r = conversationId === null
-      ? await this.db.query("SELECT * FROM messages WHERE content ILIKE $1 ORDER BY id DESC LIMIT $2", [like, limit])
-      : await this.db.query("SELECT * FROM messages WHERE content ILIKE $1 AND conversation_id = $2 ORDER BY id DESC LIMIT $3", [like, conversationId, limit]);
+      ? await this.db.query("SELECT * FROM messages WHERE strpos(lower(content), lower($1)) > 0 ORDER BY id DESC LIMIT $2", [trimmed, limit])
+      : await this.db.query("SELECT * FROM messages WHERE strpos(lower(content), lower($1)) > 0 AND conversation_id = $2 ORDER BY id DESC LIMIT $3", [trimmed, conversationId, limit]);
     return (r.rows as Row[]).map(toMessage);
   }
 

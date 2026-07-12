@@ -23,6 +23,18 @@ describe("MessagesRepo", () => {
     await expect(repo.search(null, "병원?", 10)).resolves.not.toThrow();
   });
 
+  it("ILIKE 메타문자(%, _)를 이스케이프해 리터럴로만 매칭한다", async () => {
+    await repo.insert({ conversationId: 1, ts: 1, role: "user", userId: "u1", content: "50% 할인" });
+    await repo.insert({ conversationId: 1, ts: 2, role: "user", userId: "u1", content: "50X 할인" });
+    await repo.insert({ conversationId: 1, ts: 3, role: "user", userId: "u1", content: "a_b 테스트" });
+    await repo.insert({ conversationId: 1, ts: 4, role: "user", userId: "u1", content: "aXb 테스트" });
+
+    // '%' 가 이스케이프되지 않으면 와일드카드로 해석되어 "50X 할인"도 오매칭된다.
+    expect((await repo.search(1, "50%", 10)).map((x) => x.content)).toEqual(["50% 할인"]);
+    // '_' 가 이스케이프되지 않으면 와일드카드로 해석되어 "aXb 테스트"도 오매칭된다.
+    expect((await repo.search(1, "a_b", 10)).map((x) => x.content)).toEqual(["a_b 테스트"]);
+  });
+
   it("미처리 user 메시지 조회/완료표시", async () => {
     const id = await repo.insert({ conversationId: 1, ts: 1, role: "user", userId: "u1", content: "a", processed: false });
     await repo.insert({ conversationId: 1, ts: 2, role: "user", userId: "u1", content: "b" });

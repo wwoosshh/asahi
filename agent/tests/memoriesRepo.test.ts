@@ -34,4 +34,14 @@ describe("MemoriesRepo", () => {
     await repo.delete(hits[0].id);
     expect(await repo.searchForUser("owner", "고양이")).toHaveLength(0);
   });
+
+  it("ILIKE 메타문자(%, _)를 이스케이프해 리터럴로만 매칭한다", async () => {
+    await repo.insert({ userId: "owner", scope: "shared", title: "할인", content: "50% 쿠폰" });
+    await repo.insert({ userId: "owner", scope: "shared", title: "할인아님", content: "50X 쿠폰" });
+    await repo.insert({ userId: "owner", scope: "shared", title: "밑줄", content: "a_b 값" });
+    await repo.insert({ userId: "owner", scope: "shared", title: "밑줄아님", content: "aXb 값" });
+
+    expect((await repo.searchForUser("owner", "50%")).map((m) => m.content)).toEqual(["50% 쿠폰"]);
+    expect((await repo.searchForUser("owner", "a_b")).map((m) => m.content)).toEqual(["a_b 값"]);
+  });
 });

@@ -130,6 +130,29 @@ describe("AgentCore — 멀티유저/멀티대화", () => {
     expect(t.calls.length).toBe(2);
   });
 
+  it("앞 메시지 턴이 진행 중이어도 같은 채널 후속 메시지가 즉시 durable 저장된다(크래시 복구 회귀 방지)", async () => {
+    const t = await setup({ mode: "manual" });
+    const hint = dmHint("owner", "owner");
+    pub(t.bus, hint, "A", 1);
+    await flush();
+    expect(t.calls.length).toBe(1); // A 의 턴이 시작되어(LLM 호출) 대기 중
+
+    pub(t.bus, hint, "B", 2);
+    await flush();
+    // B 의 턴은 A 뒤에 직렬(turnChains)이라 아직 시작되지 않았어야 하지만,
+    // durable 저장(ingest)은 턴과 분리되어 있으므로 A·B 모두 이미 processed=false 로 저장돼 있어야 한다.
+    expect(t.calls.length).toBe(1);
+    const unprocessed = await t.repos.messages.unprocessedUserMessages();
+    expect(unprocessed.map((m) => m.content)).toEqual(["A", "B"]);
+
+    t.resolvers.shift()!(); // A 턴 완료 → B 턴 시작
+    await flush();
+    expect(t.calls.length).toBe(2);
+    t.resolvers.shift()!(); // B 턴 완료
+    await flush();
+    expect((await t.repos.messages.unprocessedUserMessages()).length).toBe(0);
+  });
+
   it("다른 대화는 병렬로 동시에 진행한다", async () => {
     const t = await setup({ mode: "manual" });
     pub(t.bus, dmHint("owner", "owner"), "A", 1);

@@ -56,7 +56,14 @@ export class AgentCore {
   // 아직 conv.id 가 없는(첫 메시지) 시점부터 직렬화하려면 즉시 알 수 있는 채널ID 를 키로 써야 한다
   // (숫자 conv.id 로는 대화가 생성되기 전엔 큐잉할 수 없다 — 동시 첫 메시지 두 개가 대화 행을
   // 중복 생성하려 드는 경쟁을 막는다).
-  private chains = new Map<string, Promise<void>>();
+  //
+  // 체인을 durable 저장(ingest)과 LLM 턴(turn) 두 갈래로 분리한다. 하나의 체인에 묶으면 앞
+  // 메시지의 긴 LLM 턴이 끝날 때까지 뒤 메시지가 insert 조차 되지 못해, 그 사이 크래시하면
+  // recoverPending 이 복구할 행 자체가 없어 영구 유실된다(회귀). ingest 는 짧으므로 채널별로
+  // 직렬화해도 버스트가 빨리 소진되어 모든 메시지가 즉시 durable 저장되고, turn 은 여전히
+  // 채널별(=대화별)로 직렬화되어 같은 대화 재진입 금지 불변식을 유지한다.
+  private ingestChains = new Map<string, Promise<void>>();
+  private turnChains = new Map<string, Promise<void>>();
 
   constructor(deps: {
     bus: EventBus; config: Config; runTurn: TurnRunner; repos: CoreRepos; agentCwd: string; now?: () => number;
@@ -72,7 +79,7 @@ export class AgentCore {
 
   start(): void {
     // onUserMessage 자체는 동기(게이트 확인 + enqueue 만) — 실제 비동기 작업은 enqueue 된
-    // handleUserMessage 안에서 일어나고 그 오류는 enqueue 의 .catch 가 처리하므로, 여기서
+    // ingest 안에서 일어나고 그 오류는 enqueue 의 .catch 가 처리하므로, 여기서
     // 프라미스를 잃어버릴 일이 없다.
     this.bus.subscribe("user_message", (e) => this.onUserMessage(e));
   }
@@ -82,15 +89,18 @@ export class AgentCore {
     if (!hint) return; // 2B 실시간 경로는 항상 대화 힌트를 싣는다.
     if (hint.role !== "owner" && hint.role !== "allowed") return; // 게이트 재확인(방어)
 
-    // 대화 조회/생성(resolveConversation)부터 참가자 upsert·메시지 저장까지 전부 이 채널의
-    // 직렬 체인 안에서 수행한다. conv.id 는 대화가 생성되어야 나오므로, 그 전 단계인 첫 메시지부터
-    // 직렬화하려면 힌트에서 즉시 알 수 있는 discordChannelId 를 큐 키로 써야 한다 — 그러지 않으면
-    // 같은 채널의 두 메시지가 동시에 도착했을 때 resolveConversation 이 서로의 결과를 보지 못하고
-    // 대화 행을 중복 생성하거나(멱등 깨짐) 메시지 저장 순서가 뒤바뀔 수 있다.
-    this.enqueue(hint.discordChannelId, () => this.handleUserMessage(hint, e.ts, e.text));
+    // durable ingest(대화 조회/생성 + 참가자 upsert + 메시지 저장)만 이 채널의 ingest 체인에
+    // 태운다. LLM 턴은 여기서 기다리지 않는다 — ingest 가 끝나면 그 안에서 turn 체인에 별도로
+    // 이어붙인다(아래 ingest 참고). conv.id 는 대화가 생성되어야 나오므로, 그 전 단계인 첫
+    // 메시지부터 직렬화하려면 힌트에서 즉시 알 수 있는 discordChannelId 를 큐 키로 써야 한다 —
+    // 그러지 않으면 같은 채널의 두 메시지가 동시에 도착했을 때 resolveConversation 이 서로의
+    // 결과를 보지 못하고 대화 행을 중복 생성하거나(멱등 깨짐) 메시지 저장 순서가 뒤바뀔 수 있다.
+    this.enqueue(this.ingestChains, hint.discordChannelId, () => this.ingest(hint, e.ts, e.text));
   }
 
-  private async handleUserMessage(hint: ConversationHint, ts: number, text: string): Promise<void> {
+  // durable 저장만 담당(짧다) — 크래시 복구 불변식: 이 함수가 끝나면 메시지는 반드시
+  // processed=false 로 DB 에 있다. 뒤이은 LLM 턴은 turnChains 로 넘겨 별도로 직렬화한다.
+  private async ingest(hint: ConversationHint, ts: number, text: string): Promise<void> {
     const conv = await this.resolveConversation(hint, ts);
     await this.repos.participants.upsert(conv.id, hint.userId, ts);
     // 미처리(processed=false)로 먼저 저장 → 크래시로 죽어도 부팅 시 recoverPending 이 재개한다.
@@ -98,7 +108,7 @@ export class AgentCore {
       conversationId: conv.id, ts, role: "user", userId: hint.userId,
       discordMessageId: hint.discordMessageId, content: text, processed: false,
     });
-    await this.runConversationTurn(conv.id, hint.userId, hint.role as "owner" | "allowed", text, messageId);
+    this.enqueue(this.turnChains, hint.discordChannelId, () => this.runConversationTurn(conv.id, hint.userId, hint.role as "owner" | "allowed", text, messageId));
   }
 
   // 힌트로 대화 행을 확정한다(멱등: discord_channel_id → origin_message_id → 생성).
@@ -127,21 +137,25 @@ export class AgentCore {
     return conv;
   }
 
-  // 대화별 직렬락: 그 대화의 꼬리 프라미스에 작업을 이어붙인다.
-  private enqueue(channelId: string, task: () => Promise<void>): void {
-    const prev = this.chains.get(channelId) ?? Promise.resolve();
+  // 키별 직렬락(범용): 주어진 체인 맵에서 그 키의 꼬리 프라미스에 작업을 이어붙인다.
+  // ingestChains/turnChains 모두 이 헬퍼로 큐잉한다.
+  private enqueue(map: Map<string, Promise<void>>, key: string, task: () => Promise<void>): void {
+    const prev = map.get(key) ?? Promise.resolve();
     const next = prev.then(task).catch((err) => {
       console.error("[core] 처리 오류:", err);
     });
-    this.chains.set(channelId, next);
+    map.set(key, next);
   }
 
-  // 알려진 모든 대화 체인이 안정될 때까지 대기(테스트·그레이스풀 종료용).
+  // ingestChains·turnChains 가 모두 안정될 때까지 대기(테스트·그레이스풀 종료용).
+  // ingest 가 끝나며 그 안에서 turnChains 에 새 작업을 추가하므로, 두 맵을 함께 스냅샷해
+  // 반복 확인해야 "ingest 소진 → 그로 인해 turnChains 에 쌓인 것까지" 모두 잡아낸다.
   async drain(): Promise<void> {
+    const maps = [this.ingestChains, this.turnChains];
     for (let i = 0; i < 1000; i++) {
-      const chains = [...this.chains.values()];
+      const chains = maps.flatMap((m) => [...m.values()]);
       await Promise.allSettled(chains);
-      const after = [...this.chains.values()];
+      const after = maps.flatMap((m) => [...m.values()]);
       if (after.length === chains.length && after.every((p, idx) => p === chains[idx])) return;
     }
   }
@@ -229,15 +243,15 @@ export class AgentCore {
         await this.repos.messages.markProcessed(m.id);
         continue;
       }
-      this.enqueue(conv.discordChannelId, () => this.runConversationTurn(conv.id, userId, role, m.content, m.id));
+      this.enqueue(this.turnChains, conv.discordChannelId, () => this.runConversationTurn(conv.id, userId, role, m.content, m.id));
     }
   }
 
-  // 유휴 대화마다 요약 후 세션을 닫는다(대화락 안에서 직렬).
+  // 유휴 대화마다 요약 후 세션을 닫는다(turnChains 로 그 대화의 턴과 직렬).
   async closeIdleConversations(): Promise<void> {
     const cutoff = this.now() - this.idleMs();
     for (const conv of await this.repos.conversations.listActiveIdle(cutoff)) {
-      this.enqueue(conv.discordChannelId, () => this.summarizeAndClose(conv.id));
+      this.enqueue(this.turnChains, conv.discordChannelId, () => this.summarizeAndClose(conv.id));
     }
   }
 
