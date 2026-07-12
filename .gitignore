@@ -10,3 +10,6 @@ data/
 
 # 로그
 *.log
+
+# 런타임 stdout 스냅샷·임시 메모(server.txt, localworker.txt 등) — 실수 커밋 방지
+*.txt
