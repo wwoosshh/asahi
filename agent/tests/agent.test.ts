@@ -7,7 +7,7 @@ import { MemoriesRepo } from "../src/store/memoriesRepo.js";
 import { UsersRepo } from "../src/store/usersRepo.js";
 import { AllowedDirsRepo } from "../src/store/allowedDirsRepo.js";
 import { IntrospectRepo } from "../src/store/introspectRepo.js";
-import { buildToolCtx, type TurnContext, type ToolRepos } from "../src/core/agent.js";
+import { buildToolCtx, buildMultimodalMessage, type TurnContext, type ToolRepos } from "../src/core/agent.js";
 import { allowDirHandler, type RuntimeInfo } from "../src/core/tools.js";
 
 const testRuntime: RuntimeInfo = { model: "claude-opus-4-8", sdkVersion: "0.3.207", deployTarget: "local", maxTurns: 30 };
@@ -54,5 +54,21 @@ describe("buildToolCtx — makeRunAgentTurn 의 ToolCtx 구성(리뷰 #1 회귀)
     const ctx = buildToolCtx(repos, { role: "owner", isPrivate: true, isOwner: true, userId: "o", conversationId: 1 }, runtime);
     expect(ctx.repos.introspect).toBe(repos.introspect);
     expect(ctx.runtime.model).toBe("claude-opus-4-8");
+  });
+});
+
+describe("buildMultimodalMessage", () => {
+  const img = { mediaType: "image/png", base64: "AAA", name: "a.png" };
+  it("텍스트+이미지를 content 블록으로 만든다", () => {
+    const m = buildMultimodalMessage("이게 뭐야", [img]) as any;
+    expect(m.type).toBe("user");
+    expect(m.message.role).toBe("user");
+    expect(m.message.content[0]).toEqual({ type: "text", text: "이게 뭐야" });
+    expect(m.message.content[1]).toEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: "AAA" } });
+  });
+  it("텍스트가 비면 이미지 블록만 넣는다", () => {
+    const m = buildMultimodalMessage("   ", [img]) as any;
+    expect(m.message.content).toHaveLength(1);
+    expect(m.message.content[0].type).toBe("image");
   });
 });

@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Role } from "../store/usersRepo.js";
 import type { UsersRepo } from "../store/usersRepo.js";
 import type { MemoriesRepo } from "../store/memoriesRepo.js";
@@ -7,6 +7,7 @@ import type { AllowedDirsRepo } from "../store/allowedDirsRepo.js";
 import type { IntrospectRepo } from "../store/introspectRepo.js";
 import { buildTools, allowedToolsFor, TOOL_SERVER, type ToolCtx, type RuntimeInfo } from "./tools.js";
 import { decidePathPermission, isPathGatedTool, extractCandidatePaths, resolveRealOrNearestAncestor } from "./pathPermission.js";
+import type { ImageInput } from "./images.js";
 
 // 자기인지(§Task5): SDK_VERSION 은 package.json 의 @anthropic-ai/claude-agent-sdk 버전과 동기화한다.
 // DEFAULT_MODEL 은 makeRunAgentTurn 의 model 인자가 없을 때 쓰는 기본 모델이다.
@@ -22,7 +23,9 @@ export type ProgressUpdate =
   | { kind: "tool"; name: string; input?: string }
   | { kind: "tool_result"; name?: string }
   | { kind: "answering" };
-export type TurnRequest = { prompt: string; systemPrompt: string; resume?: string; cwd: string; context: TurnContext; onProgress?: (u: ProgressUpdate) => void };
+// images(§Task3 이미지 입력): 있으면 query() 의 prompt 를 문자열 대신 async-iterable(SDKUserMessage 1개)로
+// 바꿔 멀티모달 턴을 만든다(buildMultimodalMessage). 없으면 기존 문자열 prompt 경로 그대로(회귀 없음).
+export type TurnRequest = { prompt: string; systemPrompt: string; resume?: string; cwd: string; context: TurnContext; onProgress?: (u: ProgressUpdate) => void; images?: ImageInput[] };
 export type TurnResult = { text: string; sessionId?: string; ok: boolean };
 export type TurnRunner = (req: TurnRequest) => Promise<TurnResult>;
 
@@ -50,6 +53,16 @@ export function summarizeToolInput(input: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+// 이미지가 있는 턴의 SDK 입력 메시지(멀티모달). 텍스트가 비면 이미지 블록만 넣는다.
+export function buildMultimodalMessage(text: string, images: ImageInput[]): SDKUserMessage {
+  const content: Array<Record<string, unknown>> = [];
+  if (text.trim()) content.push({ type: "text", text });
+  for (const img of images) {
+    content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } });
+  }
+  return { type: "user", parent_tool_use_id: null, message: { role: "user", content } } as unknown as SDKUserMessage;
 }
 
 // query() 스트림 메시지 하나에서 진행 업데이트들을 뽑는 순수 함수. assistant 의 tool_use → 'tool',
@@ -145,9 +158,13 @@ export function makeRunAgentTurn(repos: ToolRepos, deployTarget: "local" | "clou
     // 턴 하나 동안 tool_use_id → 짧은 도구명(진행 이벤트용). onProgress 가 없으면 추출도 하지 않는다.
     const pendingToolNames = new Map<string, string>();
     const additionalDirectories = pcPrivileged && deployTarget === "local" ? await repos.allowedDirs.list(req.context.userId) : [];
+    // 이미지가 있으면 async-iterable(멀티모달 1메시지)로, 없으면 기존 문자열 prompt 그대로(회귀 금지).
+    const promptInput = req.images && req.images.length > 0
+      ? (async function* () { yield buildMultimodalMessage(req.prompt, req.images!); })()
+      : req.prompt;
 
     for await (const message of query({
-      prompt: req.prompt,
+      prompt: promptInput,
       options: {
         cwd: req.cwd,
         systemPrompt: req.systemPrompt,
