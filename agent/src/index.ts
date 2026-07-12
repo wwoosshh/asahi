@@ -14,6 +14,7 @@ import { TurnsRepo } from "./store/turnsRepo.js";
 import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
 import { JobsRepo } from "./store/jobsRepo.js";
 import { SettingsRepo } from "./store/settingsRepo.js";
+import { IntrospectRepo } from "./store/introspectRepo.js";
 import { backfillLegacyAllowedDirs } from "./store/allowedDirsMigration.js";
 import { AgentCore } from "./core/core.js";
 import { makeRunAgentTurn } from "./core/agent.js";
@@ -41,6 +42,7 @@ async function main() {
     turns: new TurnsRepo(db),
     jobs: new JobsRepo(db),
     allowedDirs,
+    introspect: new IntrospectRepo(db),
   };
   // 소유자를 users(owner)로 보장 — 게이트 통과 기본값.
   await users.upsert(config.ownerId, { role: "owner" });
@@ -53,7 +55,7 @@ async function main() {
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다 — 에이전트가 소스 트리를 훑지 않도록(1단계 점검 지적).
   const agentCwd = path.resolve(config.dataDir, "..", "agent-cwd");
   fs.mkdirSync(agentCwd, { recursive: true });
-  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users, allowedDirs: repos.allowedDirs }, config.deployTarget);
+  const runTurn = makeRunAgentTurn({ memories: repos.memories, users: repos.users, allowedDirs: repos.allowedDirs, introspect: repos.introspect }, config.deployTarget, config.model);
   const core = new AgentCore({ bus, config, runTurn, repos, agentCwd });
   core.start();
 

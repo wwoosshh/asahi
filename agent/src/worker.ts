@@ -10,6 +10,7 @@ import { SummariesRepo } from "./store/summariesRepo.js";
 import { MemoriesRepo } from "./store/memoriesRepo.js";
 import { AllowedDirsRepo } from "./store/allowedDirsRepo.js";
 import { JobsRepo } from "./store/jobsRepo.js";
+import { IntrospectRepo } from "./store/introspectRepo.js";
 import { makeRunAgentTurn } from "./core/agent.js";
 import { processJob } from "./worker/jobRunner.js";
 
@@ -41,6 +42,7 @@ async function main() {
   const memories = new MemoriesRepo(db);
   const allowedDirs = new AllowedDirsRepo(db);
   const jobs = new JobsRepo(db);
+  const introspect = new IntrospectRepo(db);
   const repos = { conversations, messages, summaries, memories, users, jobs };
 
   // 에이전트 cwd 는 소스가 아닌 데이터 영역에 둔다(index.ts 와 동일한 정책).
@@ -48,7 +50,7 @@ async function main() {
   fs.mkdirSync(agentCwd, { recursive: true });
 
   // 워커는 항상 로컬 실행(자기 PC) — deployTarget 은 항상 "local".
-  const runTurn = makeRunAgentTurn({ memories, users, allowedDirs }, "local");
+  const runTurn = makeRunAgentTurn({ memories, users, allowedDirs, introspect }, "local", config.model);
 
   let stopped = false;
 

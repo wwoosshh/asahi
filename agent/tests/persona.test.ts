@@ -143,4 +143,10 @@ describe("buildSystemPrompt — 캐릭터/관계", () => {
   it("손님 친근도 2는 '덜 서먹'/'여러 번' 다정 문구를 포함한다", () => {
     expect(buildSystemPrompt({ ...GUEST, rapportStage: 2 })).toMatch(/덜 서먹|여러 번/);
   });
+
+  it("소유자 DM 능력 블록에 db 조회로 실측 응답하라는 안내가 있다", () => {
+    const p = buildSystemPrompt({ role: "owner", isPrivate: true, isOwner: true });
+    expect(p).toMatch(/db_query|db_schema|조회/);
+    expect(p).toMatch(/실측|사실/);
+  });
 });
