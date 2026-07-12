@@ -340,10 +340,23 @@ describe("db_query 게이팅·안전", () => {
     const ctx = await ownerCtx();
     expect(await dbQueryHandler(ctx, { sql: "DELETE FROM messages" })).toMatch(/읽기 전용|SELECT/);
   });
-  it("소유자 정상 SELECT 는 결과를 반환한다", async () => {
+  it("소유자 정상 SELECT 는 결과를 반환한다(introspect 스텁으로 성공 경로 검증)", async () => {
     const ctx = await ownerCtx();
+    ctx.repos.introspect = { readOnlyQuery: async () => ({ rows: [{ n: 1 }], truncated: 0 }), schema: async () => "" } as any;
     const out = await dbQueryHandler(ctx, { sql: "SELECT 1 AS n" });
+    expect(out).not.toMatch(/쿼리 실행 오류/);
     expect(out).toMatch(/n/);
+    expect(out).toMatch(/1/);
+  });
+});
+
+describe("db_schema 게이팅·조회", () => {
+  it("소유자가 아니면 거부한다", async () => {
+    expect(await dbSchemaHandler(await ownerCtx({ isOwner: false }))).toMatch(/소유자/);
+  });
+  it("소유자에게 테이블·컬럼 구조를 반환한다", async () => {
+    const out = await dbSchemaHandler(await ownerCtx());
+    expect(out).toMatch(/messages/);
   });
 });
 

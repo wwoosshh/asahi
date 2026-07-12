@@ -103,16 +103,15 @@ export async function listDirsHandler(ctx: ToolCtx): Promise<string> {
 
 // 자기인지 도구(§Task4): 소유자 DM 전용 — db_schema/db_query/runtime_info.
 // 손님·서버·ownWorkstation 은 어느 경우에도 노출·실행 둘 다 거부한다(isOwner && isPrivate 로만 판정).
-const OWNER_DM_ONLY_DB = "이 작업은 소유자 DM에서만 할 수 있어요.";
 function isOwnerDm(ctx: ToolCtx): boolean { return ctx.isOwner && ctx.isPrivate; }
 
 export async function dbSchemaHandler(ctx: ToolCtx): Promise<string> {
-  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY;
   return await ctx.repos.introspect.schema();
 }
 
 export async function dbQueryHandler(ctx: ToolCtx, args: { sql: string }): Promise<string> {
-  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY;
   try { assertReadOnlySql(args.sql); } catch (e) { return e instanceof Error ? e.message : "잘못된 쿼리예요."; }
   try {
     const { rows, truncated } = await ctx.repos.introspect.readOnlyQuery(args.sql);
@@ -123,7 +122,7 @@ export async function dbQueryHandler(ctx: ToolCtx, args: { sql: string }): Promi
 }
 
 export async function runtimeInfoHandler(ctx: ToolCtx): Promise<string> {
-  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY_DB;
+  if (!isOwnerDm(ctx)) return OWNER_DM_ONLY;
   const r = ctx.runtime;
   return [
     `모델(설정): ${r.model}`,
