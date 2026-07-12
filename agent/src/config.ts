@@ -28,6 +28,7 @@ export type Config = {
   // 배포 대상(Railway 조각2): cloud 는 소유자 PC 가 없는 컨테이너 실행을 뜻하며, PC 도구(파일/Bash)를 비활성한다.
   // 기본은 local(기존 동작 그대로). DEPLOY_TARGET 값이 정확히 "cloud" 일 때만 cloud, 그 외(미설정·오타)는 local.
   deployTarget: "local" | "cloud";
+  model: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -50,6 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxTurnsPerHourGlobal: positiveNumberEnv(env, "MAX_TURNS_PER_HOUR_GLOBAL", 40),
     ownerReserve: positiveNumberEnv(env, "OWNER_RESERVE", 10),
     deployTarget: env.DEPLOY_TARGET === "cloud" ? "cloud" : "local",
+    model: env.ANTHROPIC_MODEL || "claude-opus-4-8",
   };
 }
 
@@ -64,6 +66,7 @@ export type WorkerConfig = {
   dataDir: string;
   memoryDir: string;
   sessionIdleMinutes: number;
+  model: string;
 };
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -79,5 +82,6 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     dataDir: env.DATA_DIR || path.resolve("..", "data", "store"),
     memoryDir: env.MEMORY_DIR || path.resolve("..", "data", "memory"),
     sessionIdleMinutes: positiveNumberEnv(env, "SESSION_IDLE_MINUTES", 30),
+    model: env.ANTHROPIC_MODEL || "claude-opus-4-8",
   };
 }
